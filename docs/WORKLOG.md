@@ -5,6 +5,23 @@
 
 ---
 
+## 2026-06-03 — Hosting 根目录部署配置 ✅
+
+**做了什么**
+- 新增根目录 `firebase.json`，用于从仓库根目录部署 Firebase。
+- Hosting public 路径改为仓库根相对路径：
+  - `apps/web/dist`
+- Firestore、RTDB、Functions 路径也在根配置中改为仓库根相对路径。
+
+**原因**
+- 从 `firebase/` 子目录部署 Hosting 时，Firebase CLI 拒绝 `../apps/web/dist`，提示 public
+  目录在项目目录之外。
+
+**下一步**
+1. 使用根目录 `firebase.json` 部署 Hosting。
+
+---
+
 ## 2026-06-03 — Phase 3 Task 4：前端轨迹读取与地图绘制 ✅
 
 **做了什么**
