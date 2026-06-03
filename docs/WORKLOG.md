@@ -5,6 +5,50 @@
 
 ---
 
+## 2026-06-03 — Phase 2 Task 5：成员监听与真实成员条 ✅
+
+**做了什么**
+- 新增 `apps/web/src/state/membersStore.ts`。
+- 监听 Firestore：
+  - `rooms/{roomId}/members`
+- 监听 RTDB：
+  - `liveLocations/{roomId}`
+- 将成员文档和实时位置合并为 `MemberView`：
+  - `online`
+  - `offline`
+  - `stale`
+  - `notSharing`
+- `MapScreen` 开始监听当前房间成员，并在离开页面时停止监听。
+- 顶部成员计数从硬编码 `1` 改为真实成员数。
+- `MemberStrip` 从只显示自己，改为显示真实成员列表；自己排第一，在线成员优先。
+- i18n 增加离线、位置过期、未共享状态文案。
+
+**规则 / 部署**
+- 已部署 Firestore rules：
+  - `firebase deploy --only firestore:rules --project zhinzen`
+- RTDB 是非默认实例 `zhinzen-live`，`firebase deploy --only database` 会查找默认实例并失败。
+- 已通过 RTDB REST settings API 发布 `database.rules.json` 到 `zhinzen-live`。
+- 已用 `firebase database:get /.settings/rules --instance zhinzen-live --project zhinzen --pretty`
+  验证 RTDB rules 生效。
+- `database.rules.json` 移除顶层说明字段，只保留 `"rules"`，以符合 RTDB settings API。
+- `firebase/firebase.json` 显式记录 RTDB instance 为 `zhinzen-live`，但当前 CLI deploy 仍不能直接用于
+  非默认实例规则发布；后续继续使用 `database:get/set --instance` 或 REST API。
+
+**验证**
+- `npm run build` 通过。
+- 未认证 REST `PUT` 写入 `liveLocations/RESTROOM/rest-test-device` 成功，验证 v0 匿名客户端可写
+  RTDB 实时位置节点。
+- 已清理本次和上次验证产生的临时 RTDB 数据，`firebase database:get /liveLocations --instance
+  zhinzen-live --project zhinzen --pretty` 返回 `null`。
+- Vite 提示主 bundle 超过 500KB；原因主要是 Firebase SDK 已进入前端 bundle，后续接 Google Maps
+  前建议做代码拆分。
+
+**下一步**
+1. 在两个浏览器窗口或两台设备中创建/加入同一房间，验证成员条和在线/过期/未共享状态。
+2. 将地图占位面替换为 Google Maps，并显示自己/其他成员图钉。
+
+---
+
 ## 2026-06-03 — Phase 2 Task 4：自己的实时位置上传 ✅
 
 **做了什么**

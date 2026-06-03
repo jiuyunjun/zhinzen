@@ -1,9 +1,4 @@
 {
-  "//": "Zhinzen Realtime Database rules — v0 BASELINE (design.md §15). Holds live",
-  "//1": "locations for low-latency fan-out: liveLocations/{roomId}/{deviceId}.",
-  "//2": "Same caveat as firestore.rules: this is NOT production-grade. deviceId",
-  "//3": "ownership cannot be proven without server validation. Hardening (Cloud",
-  "//4": "Functions deviceSecret check + App Check) is a TODO for later phases.",
   "rules": {
     "liveLocations": {
       "$roomId": {

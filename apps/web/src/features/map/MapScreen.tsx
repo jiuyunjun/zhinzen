@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { color as tokens, font, mapThemes, withAlpha } from '@zhinzen/shared-ui';
 import { useDeviceStore } from '../../state/deviceStore';
 import { useLocationStore } from '../../state/locationStore';
+import { useMembersStore } from '../../state/membersStore';
 import { useRoomStore } from '../../state/roomStore';
 import { useUiStore } from '../../state/uiStore';
 import { Icon, type IconName } from '../../components/Icon';
@@ -24,9 +25,19 @@ export function MapScreen({ onLeave }: { onLeave: () => void }) {
   const stopLocationSharing = useLocationStore((s) => s.stopSharing);
   const locationStatus = useLocationStore((s) => s.status);
   const locationError = useLocationStore((s) => s.error);
+  const members = useMembersStore((s) => s.members);
+  const watchMembers = useMembersStore((s) => s.watchRoom);
+  const stopWatchingMembers = useMembersStore((s) => s.stopWatching);
   const displayName = useDeviceStore((s) => s.displayName);
   const deviceId = useDeviceStore((s) => s.deviceId);
   const { msg, flash } = useToast();
+
+  useEffect(() => {
+    if (!roomId) return;
+
+    watchMembers(roomId, deviceId);
+    return () => stopWatchingMembers();
+  }, [deviceId, roomId, stopWatchingMembers, watchMembers]);
 
   useEffect(() => {
     if (!roomId) return;
@@ -148,7 +159,7 @@ export function MapScreen({ onLeave }: { onLeave: () => void }) {
           }}
         >
           <Icon name="people" size={18} color={tokens.inkSoft} />
-          <span style={{ fontSize: 14, fontWeight: 650 }}>1</span>
+          <span style={{ fontSize: 14, fontWeight: 650 }}>{members.length || 1}</span>
           <span style={{ width: 1, height: 18, background: tokens.line, margin: '0 2px' }} />
           <span
             style={{
@@ -234,7 +245,7 @@ export function MapScreen({ onLeave }: { onLeave: () => void }) {
             margin: '0 auto 14px',
           }}
         />
-        <MemberStrip selfName={displayName} sharing={sharing} />
+        <MemberStrip members={members} selfName={displayName} sharing={sharing} />
         <button
           type="button"
           onClick={onLeave}
