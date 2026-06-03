@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { TrackPoint } from '@zhinzen/shared-types';
-import { color as tokens, font, mapThemes, withAlpha } from '@zhinzen/shared-ui';
+import { color as tokens, font, mapThemes } from '@zhinzen/shared-ui';
 import { useDeviceStore } from '../../state/deviceStore';
 import { useLocationStore } from '../../state/locationStore';
 import { useMembersStore } from '../../state/membersStore';
@@ -304,32 +304,9 @@ export function MapScreen({ onLeave }: { onLeave: () => void }) {
             member={selectedMember}
             ownLocation={effectiveOwnLocation}
             onClose={() => setSelectedDeviceId(null)}
+            onLeaveRoom={onLeave}
           />
         )}
-        <button
-          type="button"
-          onClick={onLeave}
-          style={{
-            width: '100%',
-            marginTop: 14,
-            height: 46,
-            borderRadius: 14,
-            border: 'none',
-            cursor: 'pointer',
-            background: withAlpha(tokens.danger, 0.1),
-            color: tokens.danger,
-            fontFamily: 'inherit',
-            fontSize: 14,
-            fontWeight: 600,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: 8,
-          }}
-        >
-          <Icon name="back" size={17} />
-          {t('leaveRoom')}
-        </button>
       </div>
 
       <Toast msg={msg} />

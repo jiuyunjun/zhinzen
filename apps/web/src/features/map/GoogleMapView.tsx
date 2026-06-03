@@ -112,7 +112,7 @@ export function GoogleMapView({
 
     syncMarkers(map, markersRef.current, pins, selectedDeviceId, onSelectMember);
 
-    if (!initializedRef.current) {
+    if (!initializedRef.current && pins.length > 0) {
       initializedRef.current = true;
       fitMapToPins(map, pins);
     }
@@ -127,11 +127,11 @@ export function GoogleMapView({
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !focusLocation) return;
+    if (!map || !focusLocation || recenterSignal === 0) return;
 
     map.panTo(toLatLng(focusLocation)!);
     if ((map.getZoom() ?? 0) < DEFAULT_ZOOM) map.setZoom(DEFAULT_ZOOM);
-  }, [focusLocation, recenterSignal]);
+  }, [recenterSignal]);
 
   return (
     <div style={{ position: 'absolute', inset: 0 }}>

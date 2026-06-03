@@ -16,9 +16,15 @@ interface MemberDetailPanelProps {
   member: MemberView;
   ownLocation: LiveLocation | null;
   onClose: () => void;
+  onLeaveRoom?: () => void;
 }
 
-export function MemberDetailPanel({ member, ownLocation, onClose }: MemberDetailPanelProps) {
+export function MemberDetailPanel({
+  member,
+  ownLocation,
+  onClose,
+  onLeaveRoom,
+}: MemberDetailPanelProps) {
   const t = useUiStore((s) => s.t);
   const name = member.member.displayName.trim() || t('you');
   const location = member.location;
@@ -163,6 +169,33 @@ export function MemberDetailPanel({ member, ownLocation, onClose }: MemberDetail
         <Icon name="nav" size={17} />
         {t('navigate')}
       </button>
+
+      {member.isSelf && onLeaveRoom && (
+        <button
+          type="button"
+          onClick={onLeaveRoom}
+          style={{
+            width: '100%',
+            height: 42,
+            marginTop: 8,
+            borderRadius: 14,
+            border: 'none',
+            cursor: 'pointer',
+            background: withAlpha(tokens.danger, 0.1),
+            color: tokens.danger,
+            fontFamily: 'inherit',
+            fontSize: 13.5,
+            fontWeight: 700,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 8,
+          }}
+        >
+          <Icon name="back" size={16} />
+          {t('leaveRoom')}
+        </button>
+      )}
     </section>
   );
 }
