@@ -5,6 +5,55 @@
 
 ---
 
+## 2026-06-03 — Phase 2 任务拆分 ✅
+
+**目标**
+把 Phase 2 拆成可连续交付的小任务，每个任务完成后单独 commit，避免把后端、定位、地图和规则硬化混在一起。
+
+**任务顺序**
+1. Firebase Web SDK 初始化
+   - 安装 `firebase` 到 `apps/web` workspace。
+   - 新增 `apps/web/src/lib/firebase.ts`。
+   - 从 `env.ts` 初始化 Firebase App、Firestore、Realtime Database。
+   - 支持本地 emulator 连接开关。
+   - 验证：`npm run build`。
+2. Cloud Functions 基础接口
+   - 实现 `createRoom` / `joinRoom` callable functions。
+   - 写入 Firestore `rooms/{roomId}`、`members/{deviceId}`、`deviceSessions/{deviceId}`。
+   - 不引入账号体系，只使用 `roomId + deviceId + deviceSecret`。
+   - 验证：functions typecheck/build。
+3. 前端房间流程接后端
+   - 将 `roomStore.createRoom` / `joinRoom` 从本地 mock 替换为后端调用。
+   - 保持现有 onboarding → room → map UI 流程不变。
+   - 处理房间不存在、过期、容量满、网络错误。
+   - 验证：`npm run build` + 手动创建/加入。
+4. 位置状态与上传
+   - 新增 `locationStore`。
+   - 请求 Geolocation 权限，获取系统融合定位结果。
+   - 仅在共享开启时写入 RTDB `liveLocations/{roomId}/{deviceId}`。
+   - 停止共享后停止上传。
+   - 验证：本地或真实项目查看 RTDB 更新。
+5. 成员监听与状态
+   - 新增 `membersStore`。
+   - 监听 Firestore 成员列表和 RTDB 实时位置。
+   - 显示在线、离线、位置过期、未共享位置状态。
+   - 验证：双浏览器窗口加入同一房间。
+6. 地图接入
+   - 用 Google Maps JavaScript API 替换当前占位地图。
+   - 显示自己和其他成员图钉。
+   - 成员条显示真实距离和最后更新时间。
+   - 验证：`npm run build` + 浏览器手动检查。
+7. 安全规则收紧
+   - 更新 `firestore.rules` 与 `database.rules.json`。
+   - 尽量限制写入自己的成员、位置和轨迹。
+   - 记录 v0 仍无法仅靠规则证明 `deviceSecret` 的限制。
+   - 验证：Firebase emulator rules 测试或手动规则验证。
+
+**当前执行**
+- 先推进任务 1：Firebase Web SDK 初始化。
+
+---
+
 ## 2026-06-03 — Phase 2 RTDB 创建完成 ✅
 
 **做了什么**
