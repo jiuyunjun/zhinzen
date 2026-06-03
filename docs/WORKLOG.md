@@ -5,6 +5,53 @@
 
 ---
 
+## 2026-06-03 — Phase 2 准备 / 交接（环境配置）⏳ 进行中
+
+**已完成（commit `a160393`）**
+- 用户在根目录放了 `env.local`（无前导点、含**真实 Maps key**），该文件名**不被 .gitignore
+  覆盖**、差点泄露。已改名为 `.env.local`（Vite 约定 + 被 `.gitignore` 的 `.env.*` 忽略），
+  变量名改为 `VITE_MAPS_API_KEY`（Vite 仅暴露 `VITE_` 前缀给前端），删除旧 `env.local`。
+- `apps/web/vite.config.ts`：`envDir: '../..'`，从仓库根加载 `.env.local`。
+- `.env.example`（已提交，占位）：`VITE_MAPS_API_KEY` + 7 个 `VITE_FIREBASE_*`。
+- `apps/web/src/lib/env.ts`：typed 读取（`mapsApiKey`、`firebaseConfig`、
+  `isFirebaseConfigured()`、`isMapsConfigured()`）。`apps/web/src/vite-env.d.ts`：给自定义
+  `VITE_*` 加类型。`npm run build` 通过。
+
+**⚠️ 下一个 agent 必须先提醒/确认用户的安全事项**
+- Maps JS API key 必然进前端打包产物（藏不住）。真正防护：GCP 控制台给该 key 加
+  **HTTP 引荐来源限制**（localhost:5173/* + 部署域名）+ **API 限制只勾 Maps JavaScript API**。
+  该 key 曾以明文落盘并发给过 agent，建议轮换或确认限制到位。**它没进 git 历史。**
+- 真实 `.env.local` 的值只在用户本地；仓库里只有 `.env.example` 占位。
+
+**Phase 2 开始前的阻塞项（需用户提供 / 决策 —— 我提问时被打断，问题如下）**
+1. **Firebase web 配置**：用户已建 Firebase 项目（名 “Zhinzen”，**确切 projectId 待确认**）。
+   需要从控制台「项目设置 → 常规 → 你的应用(Web) → SDK config」拿到并填入 `.env.local`：
+   `apiKey / authDomain / projectId / storageBucket / messagingSenderId / appId / databaseURL`
+   （对应 7 个 `VITE_FIREBASE_*`）。Firebase web `apiKey` 非机密，靠 Rules + App Check 保护。
+2. **Realtime Database 是否已开启**（design 用 RTDB 存实时位置 `liveLocations/{roomId}/{deviceId}`，
+   需要 `databaseURL`）。若没开：控制台 → 构建 → Realtime Database → 创建数据库 → 选区域。
+3. **环境选择**：建议 **先用 Firebase Emulator Suite** 跑通逻辑（需本机 `firebase-tools`），
+   验证后再切真实项目；或直接连真实项目。`firebase/firebase.json` 已配好 emulators 端口。
+   还需创建 `.firebaserc`（写 projectId，确认后再建）。
+
+**Phase 2 实施清单（design.md §16 Phase 2 + agents.md §16）**
+- 装 `firebase` Web SDK 到 `apps/web`；新建 `apps/web/src/lib/firebase.ts` 用 `env.ts` 的
+  `firebaseConfig` 初始化 app / firestore / database（emulator 模式下 connect emulators）。
+- 写 Cloud Functions：`createRoom`（高熵 roomId+过期+creator deviceSession）、`joinRoom`
+  （容量/过期校验 + deviceSession）—— 见 `firebase/functions/src/index.ts` 里已列的 TODO。
+- 把 `state/roomStore.ts` 的 `createRoom/joinRoom/leaveRoom` 从本地实现换成调用上述后端
+  （接口名不变，原地替换）；`deviceStore` 的 deviceSecret 用于写校验证明。
+- 位置：请求 Geolocation 权限 → 获取融合定位 → 按 design §4.4 频率上传到 RTDB
+  `liveLocations/{roomId}/{deviceId}`；监听房间成员（Firestore `rooms/{roomId}/members`）与
+  实时位置。新增 `locationStore` / `membersStore`（design §14 的 locationState/membersState）。
+- 地图：接 **Google Maps JavaScript API**（用 `mapsApiKey`），把 `MapScreen` 的占位面换成
+  真实地图，渲染自己 + 其他成员图钉（颜色用 `shared-ui` 的 `peopleColors`），成员条显示真实
+  距离（`geo-utils.calculateDistance`/`formatDistance`）与状态（`isLocationStale`）。
+- 收紧 `firebase/firestore.rules` 与 `database.rules.json` 里的 `TODO(phase-2)`（deviceSession
+  校验）。用 emulator 验证创建/加入/上传/监听全链路。
+
+---
+
 ## 2026-06-03 — Phase 1：Web MVP 骨架 ✅（无后端）
 
 **做了什么**
