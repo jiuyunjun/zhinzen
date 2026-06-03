@@ -5,6 +5,45 @@
 
 ---
 
+## 2026-06-03 — Phase 2 Task 2：Cloud Functions 房间接口 ✅
+
+**做了什么**
+- 实现 callable functions：
+  - `createRoom`
+  - `joinRoom`
+- `createRoom` 会生成 10 位 Crockford base32 高熵 `roomId`，创建：
+  - `rooms/{roomId}`
+  - `rooms/{roomId}/members/{deviceId}`
+  - `rooms/{roomId}/deviceSessions/{deviceId}`
+- `joinRoom` 会校验：
+  - 房间存在
+  - 房间 `status` 为 `active`
+  - 房间未过期
+  - 成员数未超过 `maxMembers`
+  - 同一 `deviceId` 的 `deviceSecret` hash 必须匹配已有 session
+- `deviceSecret` 不明文保存，只保存 `sha256(roomId:deviceId:deviceSecret)`。
+- 给 `firebase/functions` 生成并提交独立 `package-lock.json`。
+- 将 `firebase-admin` 升级到 `^13.10.0`，验证当前实现仍可构建。
+
+**默认值**
+- 房间有效期：24 小时。
+- 最大成员数：20。
+- 轨迹保留：120 分钟。
+- 默认平台：`web`。
+- 默认能力：`location/imu/compass/uwb/ble` 均为 `false`，后续由前端/位置能力检测更新。
+
+**验证**
+- `npm run build`（`firebase/functions`）通过。
+- `npm audit --omit=dev` 仍有 Firebase/Google Cloud 依赖链上的 moderate `uuid` 提示；
+  `npm audit fix --force` 建议降级到不适合当前 Functions 版本的 `firebase-admin@10.3.0`，
+  本次不做破坏性降级。
+
+**下一步**
+1. 前端新增调用 `createRoom` / `joinRoom` 的 API 包装。
+2. 将 `roomStore` 从本地 mock 切到真实后端。
+
+---
+
 ## 2026-06-03 — Phase 2 Task 1：Firebase Web SDK 初始化 ✅
 
 **做了什么**
