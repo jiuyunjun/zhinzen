@@ -5,6 +5,7 @@ import { useDeviceStore } from '../../state/deviceStore';
 import { useLocationStore } from '../../state/locationStore';
 import { useMembersStore } from '../../state/membersStore';
 import { useRoomStore } from '../../state/roomStore';
+import { useSensorStore } from '../../state/sensorStore';
 import { useUiStore } from '../../state/uiStore';
 import { Icon, type IconName } from '../../components/Icon';
 import { Toast, useToast } from '../../components/Toast';
@@ -32,6 +33,7 @@ export function MapScreen({ onLeave }: { onLeave: () => void }) {
   const members = useMembersStore((s) => s.members);
   const watchMembers = useMembersStore((s) => s.watchRoom);
   const stopWatchingMembers = useMembersStore((s) => s.stopWatching);
+  const startCompass = useSensorStore((s) => s.startCompass);
   const displayName = useDeviceStore((s) => s.displayName);
   const deviceId = useDeviceStore((s) => s.deviceId);
   const deviceSecret = useDeviceStore((s) => s.deviceSecret);
@@ -140,7 +142,13 @@ export function MapScreen({ onLeave }: { onLeave: () => void }) {
   const onToggleSharing = () => {
     const next = !sharing;
     setSharing(next);
+    if (next) void startCompass();
     flash(next ? t('sharingOn') : t('sharingOff'));
+  };
+
+  const onSelectMember = (targetDeviceId: string) => {
+    setSelectedDeviceId(targetDeviceId);
+    void startCompass();
   };
 
   const onRecenter = () => {
@@ -165,7 +173,7 @@ export function MapScreen({ onLeave }: { onLeave: () => void }) {
         recenterSignal={recenterSignal}
         selectedDeviceId={selectedDeviceId}
         trackPoints={trackPoints}
-        onSelectMember={setSelectedDeviceId}
+        onSelectMember={onSelectMember}
       />
 
       {/* top status bar */}
@@ -289,7 +297,7 @@ export function MapScreen({ onLeave }: { onLeave: () => void }) {
           selfName={displayName}
           sharing={sharing}
           selectedDeviceId={selectedDeviceId}
-          onSelect={setSelectedDeviceId}
+          onSelect={onSelectMember}
         />
         {selectedMember && (
           <MemberDetailPanel

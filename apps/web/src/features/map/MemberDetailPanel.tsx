@@ -1,9 +1,15 @@
-import { calculateDistance, formatDistance } from '@zhinzen/geo-utils';
+import {
+  calculateBearing,
+  calculateDistance,
+  calculateRelativeDirection,
+  formatDistance,
+} from '@zhinzen/geo-utils';
 import type { LiveLocation } from '@zhinzen/shared-types';
 import { color as tokens, font, withAlpha } from '@zhinzen/shared-ui';
 
 import { Icon } from '../../components/Icon';
 import type { MemberView, MemberViewStatus } from '../../state/membersStore';
+import { useSensorStore } from '../../state/sensorStore';
 import { useUiStore } from '../../state/uiStore';
 
 interface MemberDetailPanelProps {
@@ -16,8 +22,15 @@ export function MemberDetailPanel({ member, ownLocation, onClose }: MemberDetail
   const t = useUiStore((s) => s.t);
   const name = member.member.displayName.trim() || t('you');
   const location = member.location;
+  const deviceHeading = useSensorStore((s) => s.heading);
+  const compassStatus = useSensorStore((s) => s.compassStatus);
   const canNavigate = Boolean(location && member.status === 'online');
   const distance = ownLocation && location ? formatDistance(calculateDistance(ownLocation, location)) : null;
+  const targetBearing = ownLocation && location ? calculateBearing(ownLocation, location) : null;
+  const relativeDirection =
+    targetBearing !== null && deviceHeading !== null
+      ? calculateRelativeDirection(targetBearing, deviceHeading)
+      : null;
 
   const onNavigate = () => {
     if (!location || !canNavigate) return;
@@ -118,6 +131,13 @@ export function MemberDetailPanel({ member, ownLocation, onClose }: MemberDetail
         </div>
       )}
 
+      <DirectionPointer
+        available={relativeDirection !== null}
+        rotation={relativeDirection ?? 0}
+        bearing={targetBearing}
+        compassStatus={compassStatus}
+      />
+
       <button
         type="button"
         onClick={onNavigate}
@@ -144,6 +164,71 @@ export function MemberDetailPanel({ member, ownLocation, onClose }: MemberDetail
         {t('navigate')}
       </button>
     </section>
+  );
+}
+
+function DirectionPointer({
+  available,
+  rotation,
+  bearing,
+  compassStatus,
+}: {
+  available: boolean;
+  rotation: number;
+  bearing: number | null;
+  compassStatus: 'idle' | 'requesting' | 'watching' | 'unavailable';
+}) {
+  const t = useUiStore((s) => s.t);
+  const detail =
+    available && bearing !== null
+      ? `${Math.round(bearing)}°`
+      : compassStatus === 'requesting'
+        ? t('compassRequesting')
+        : t('compassUnavailable');
+
+  return (
+    <div
+      style={{
+        marginTop: 12,
+        borderRadius: 16,
+        background: available ? withAlpha(tokens.target, 0.1) : withAlpha(tokens.offline, 0.12),
+        padding: 12,
+        display: 'flex',
+        alignItems: 'center',
+        gap: 12,
+      }}
+    >
+      <div
+        style={{
+          width: 58,
+          height: 58,
+          borderRadius: '50%',
+          background: '#fff',
+          boxShadow: `inset 0 0 0 1px ${tokens.line}`,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          color: available ? tokens.target : tokens.inkFaint,
+          flexShrink: 0,
+        }}
+      >
+        <div
+          style={{
+            transform: `rotate(${rotation}deg)`,
+            transition: 'transform 180ms ease',
+            display: 'flex',
+          }}
+        >
+          <Icon name="nav" size={30} strokeWidth={2.4} />
+        </div>
+      </div>
+      <div style={{ minWidth: 0 }}>
+        <div style={{ color: tokens.ink, fontSize: 13.5, fontWeight: 750 }}>{t('direction')}</div>
+        <div style={{ marginTop: 3, color: tokens.inkSoft, fontSize: 12.5, lineHeight: 1.35 }}>
+          {detail}
+        </div>
+      </div>
+    </div>
   );
 }
 

@@ -5,6 +5,34 @@
 
 ---
 
+## 2026-06-03 — Phase 4 Task 1：Web 方向指针基础 ✅
+
+**做了什么**
+- 新增 `apps/web/src/state/sensorStore.ts`。
+- 监听 Web `deviceorientationabsolute` / `deviceorientation`，提取设备朝向。
+- 支持 iOS Safari 的 `DeviceOrientationEvent.requestPermission()`。
+- 点击开启共享或选中成员时尝试启动罗盘监听。
+- 成员详情面板增加方向指针：
+  - 根据自己的位置和目标位置计算目标方位角。
+  - 根据设备朝向计算屏幕箭头旋转角。
+  - 罗盘不可用时显示“方向不可用，仅显示距离”。
+- i18n 增加方向和罗盘不可用文案。
+
+**验证**
+- `npm run build` 通过。
+- Vite 仍提示主 bundle 超过 500KB，后续应单独做 Firebase 代码拆分。
+
+**注意**
+- Web 罗盘数据依赖浏览器和设备，Android Chrome 通常更容易拿到；iOS Safari 需要用户手势授权。
+- 当前只做基础指向，后续需要真机调校抖动和平滑。
+
+**下一步**
+1. 真机验证 Android Chrome / iOS Safari 罗盘授权和箭头方向。
+2. 增加方向数据平滑，减少抖动。
+3. 将方向状态同步到成员条或独立方向模式。
+
+---
+
 ## 2026-06-03 — Hosting 根目录部署配置 ✅
 
 **做了什么**
