@@ -21,3 +21,30 @@ body {
 #root {
   min-height: 100vh;
 }
+
+::-webkit-scrollbar {
+  display: none;
+}
+
+@keyframes zzSelfPulse {
+  0%,
+  100% {
+    transform: scale(0.85);
+    opacity: 0.55;
+  }
+  50% {
+    transform: scale(1.05);
+    opacity: 0.28;
+  }
+}
+
+@keyframes zzToastIn {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -8px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}

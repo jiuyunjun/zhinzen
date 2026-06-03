@@ -5,6 +5,52 @@
 
 ---
 
+## 2026-06-03 — Phase 1：Web MVP 骨架 ✅（无后端）
+
+**做了什么**
+把 `apps/web` 从 Phase 0 占位页换成真实的 **onboarding → room → map** 流程骨架，对照
+`docs/ui/prototype` 重建视觉，全程走设计 token 与 i18n。**本阶段不接后端**（创建/加入房间
+只改本地状态 + URL hash），真正的 Firebase / 实时成员留给 Phase 2。
+
+**新增结构（apps/web/src）**
+- `lib/deviceIdentity.ts`：设备即用户 —— 首次启动用 `crypto.randomUUID()` + 32 字节随机
+  生成 `deviceId`/`deviceSecret`，存 localStorage（`zhinzen.device.v1`），后续复用；
+  `displayName` 可改。secret 永不展示/上报（design.md §2.2）。
+- `lib/roomCode.ts`：高熵房间码（Crockford base32，10 位 ≈50 bit），`generateRoomId`/
+  `formatRoomCode`(分组显示)/`inviteLink`(`#/r/CODE`)/`parseRoomInput`(链接或码)/`roomFromUrl`。
+- `i18n/`：zh/en 字典 + `makeT()`（`{var}` 插值）+ `detectLang()`（中文优先）。
+- `state/`（Zustand，对应 design.md §14 分区）：`deviceStore`(身份)、`roomStore`(roomId +
+  sharing + 创建/加入/离开)、`uiStore`(语言 + 绑定的 t)。
+- `components/`：`Icon`(几何图标集)、`Wordmark`、`PrimaryButton`、`LangToggle`(中/EN 切换，
+  替代原型的 Tweaks 语言控件)、`Toast`(+`useToast`)。
+- `features/`：`onboarding/Onboarding`(姓名输入)、`room/RoomChoice`(创建/加入 + 邀请码输入)、
+  `map/MapScreen`(顶栏 房间码+邀请复制 / 占位地图+自己标记 / 共享开关 FAB + recenter /
+  底部成员条 + 离开房间)、`map/MemberStrip`(仅自己，成员计数暂硬编码为 1)。
+- `App.tsx`：阶段路由（按持久化姓名 + URL 邀请链接推导入口）。`index.css` 加了
+  `zzSelfPulse`/`zzToastIn` keyframes。去掉了原型里的 iOS 设备外壳 —— 真机 Web 全屏布局。
+
+**关键决策**
+- 不引入路由库：邀请链接走 URL hash（`#/r/CODE`），免服务端路由配置；打开即解析。
+- 房间码本身即 join 标识（链接与码一致、可输入），骨架阶段无后端校验，已在代码注释标明
+  Phase 2 接入真实房间记录（容量/过期/deviceSession）。
+- 创建/加入/离开都通过 store 的同名 action，Phase 2 可原地替换为 Firebase 实现。
+- 地图先用占位面（paper 底 + 脉冲自己点 + 「下一阶段接 Google 地图」提示），不引 Maps SDK
+  （需 API key，属 Phase 2/3）。recenter FAB 暂为占位反馈。
+
+**验证**
+- `npm run build`（web：tsc --noEmit + vite build）通过。流程：首启 onboarding → 命名 →
+  room → 创建/加入 → map；离开回 room；带 `#/r/CODE` 打开且已命名则直达 map。
+
+**下一步：Phase 2 — 实时位置**
+1. 接 Firebase（Web SDK + 真实项目配置/env），用 emulator 先跑通。
+2. roomStore/createRoom/joinRoom 换成真实房间记录 + deviceSession（写 Cloud Function）。
+3. 位置权限请求 + 获取融合定位 + 定期上传到 RTDB `liveLocations/{roomId}/{deviceId}`。
+4. 监听房间成员与实时位置，地图显示其他人（此时接 Google Maps），成员条显示真实距离/状态。
+5. 在线/离线/过期状态（用 geo-utils 的 `isLocationStale`），收紧 Firestore/RTDB 规则的
+   `TODO(phase-2)`。
+
+---
+
 ## 2026-06-03 — Phase 0：项目初始化 ✅
 
 **做了什么**
