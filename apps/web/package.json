@@ -13,6 +13,7 @@
     "@zhinzen/geo-utils": "*",
     "@zhinzen/shared-types": "*",
     "@zhinzen/shared-ui": "*",
+    "firebase": "^12.14.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "zustand": "^5.0.14"

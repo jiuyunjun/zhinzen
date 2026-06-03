@@ -29,6 +29,9 @@ export const firebaseConfig: FirebaseConfig = {
   databaseURL: env.VITE_FIREBASE_DATABASE_URL ?? '',
 };
 
+export const useFirebaseEmulators: boolean =
+  (env.VITE_USE_FIREBASE_EMULATORS ?? '').toLowerCase() === 'true';
+
 /** True once the core Firebase web config is present (set in .env.local). */
 export function isFirebaseConfigured(): boolean {
   return Boolean(firebaseConfig.apiKey && firebaseConfig.projectId && firebaseConfig.databaseURL);

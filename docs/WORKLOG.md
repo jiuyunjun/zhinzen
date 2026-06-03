@@ -5,6 +5,34 @@
 
 ---
 
+## 2026-06-03 — Phase 2 Task 1：Firebase Web SDK 初始化 ✅
+
+**做了什么**
+- 给 `apps/web` workspace 安装 Firebase Web SDK。
+- 新增 `apps/web/src/lib/firebase.ts`，集中初始化 Firebase App、Firestore、Realtime Database
+  和 Functions。
+- 在 `apps/web/src/lib/env.ts` 增加 `useFirebaseEmulators` typed env 开关。
+- 在 `.env.example` 与 `apps/web/src/vite-env.d.ts` 增加 `VITE_USE_FIREBASE_EMULATORS`。
+- emulator 端口对齐 `firebase/firebase.json`：
+  - Firestore：`127.0.0.1:8080`
+  - Realtime Database：`127.0.0.1:9000`
+  - Functions：`127.0.0.1:5001`
+
+**关键决策**
+- `getFirebaseServices()` 懒初始化 Firebase，避免仅导入模块时因为环境缺失导致页面崩溃。
+- 当前 Functions 不指定 region，先保持和现有 `health` 探针一致；后续实现 callable functions
+  时再统一区域策略。
+
+**验证**
+- `npm run build` 通过。
+- `npm audit --omit=dev`：生产依赖 0 个漏洞。
+
+**下一步**
+1. 实现 Cloud Functions `createRoom` / `joinRoom`。
+2. 前端后续通过 `getFirebaseServices()` 获取 Firestore / RTDB / Functions 实例。
+
+---
+
 ## 2026-06-03 — Phase 2 任务拆分 ✅
 
 **目标**
