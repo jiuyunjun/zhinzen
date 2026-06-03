@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { color as tokens, font, mapThemes, withAlpha } from '@zhinzen/shared-ui';
 import { useDeviceStore } from '../../state/deviceStore';
 import { useLocationStore } from '../../state/locationStore';
@@ -9,12 +9,12 @@ import { Icon, type IconName } from '../../components/Icon';
 import { Toast, useToast } from '../../components/Toast';
 import { LangToggle } from '../../components/LangToggle';
 import { formatRoomCode, inviteLink } from '../../lib/roomCode';
+import { GoogleMapView } from './GoogleMapView';
 import { MemberStrip } from './MemberStrip';
 
 /**
- * Map screen skeleton (design.md §7.3). Establishes the chrome — top status bar,
- * map surface, floating actions, bottom member sheet — around a placeholder map.
- * Google Maps, live member pins and real presence arrive in Phase 2/3.
+ * Map screen (design.md §7.3). Keeps the mobile chrome over a full-screen
+ * Google Map, with live member pins and the bottom member sheet.
  */
 export function MapScreen({ onLeave }: { onLeave: () => void }) {
   const t = useUiStore((s) => s.t);
@@ -25,11 +25,13 @@ export function MapScreen({ onLeave }: { onLeave: () => void }) {
   const stopLocationSharing = useLocationStore((s) => s.stopSharing);
   const locationStatus = useLocationStore((s) => s.status);
   const locationError = useLocationStore((s) => s.error);
+  const ownLocation = useLocationStore((s) => s.current);
   const members = useMembersStore((s) => s.members);
   const watchMembers = useMembersStore((s) => s.watchRoom);
   const stopWatchingMembers = useMembersStore((s) => s.stopWatching);
   const displayName = useDeviceStore((s) => s.displayName);
   const deviceId = useDeviceStore((s) => s.deviceId);
+  const [recenterSignal, setRecenterSignal] = useState(0);
   const { msg, flash } = useToast();
 
   useEffect(() => {
@@ -93,6 +95,11 @@ export function MapScreen({ onLeave }: { onLeave: () => void }) {
     flash(next ? t('sharingOn') : t('sharingOff'));
   };
 
+  const onRecenter = () => {
+    setRecenterSignal((value) => value + 1);
+    flash(t('recenter'));
+  };
+
   return (
     <div
       style={{
@@ -102,32 +109,13 @@ export function MapScreen({ onLeave }: { onLeave: () => void }) {
         background: mapThemes.light.paper,
       }}
     >
-      {/* placeholder map surface */}
-      <div
-        style={{
-          position: 'absolute',
-          inset: 0,
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: 18,
-        }}
-      >
-        <SelfMarker />
-        <span
-          style={{
-            fontFamily: font.mono,
-            fontSize: 12,
-            color: tokens.inkFaint,
-            background: withAlpha(tokens.self, 0.06),
-            padding: '6px 12px',
-            borderRadius: 10,
-          }}
-        >
-          {t('mapComingSoon')}
-        </span>
-      </div>
+      <GoogleMapView
+        members={members}
+        ownLocation={ownLocation}
+        ownDisplayName={displayName}
+        ownDeviceId={deviceId}
+        recenterSignal={recenterSignal}
+      />
 
       {/* top status bar */}
       <div
@@ -218,7 +206,7 @@ export function MapScreen({ onLeave }: { onLeave: () => void }) {
           onClick={onToggleSharing}
           label="share"
         />
-        <Fab icon="recenter" onClick={() => flash(t('recenter'))} label="recenter" />
+        <Fab icon="recenter" onClick={onRecenter} label="recenter" />
       </div>
 
       {/* bottom sheet */}
@@ -273,38 +261,6 @@ export function MapScreen({ onLeave }: { onLeave: () => void }) {
       </div>
 
       <Toast msg={msg} />
-    </div>
-  );
-}
-
-function SelfMarker() {
-  return (
-    <div style={{ position: 'relative', width: 22, height: 22 }}>
-      <div
-        style={{
-          position: 'absolute',
-          left: '50%',
-          top: '50%',
-          width: 140,
-          height: 140,
-          marginLeft: -70,
-          marginTop: -70,
-          borderRadius: '50%',
-          background: withAlpha(tokens.self, 0.16),
-          animation: 'zzSelfPulse 3s ease-in-out infinite',
-        }}
-      />
-      <div
-        style={{
-          position: 'relative',
-          width: 22,
-          height: 22,
-          borderRadius: '50%',
-          background: tokens.self,
-          border: '3px solid #fff',
-          boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
-        }}
-      />
     </div>
   );
 }

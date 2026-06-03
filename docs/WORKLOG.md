@@ -5,6 +5,36 @@
 
 ---
 
+## 2026-06-03 — Phase 2 Task 6：Google Maps 地图与实时图钉 ✅
+
+**做了什么**
+- 新增 `apps/web/src/lib/googleMaps.ts`，按需加载 Google Maps JavaScript API。
+- 新增 `apps/web/src/features/map/GoogleMapView.tsx`。
+- 用真实 Google Map 替换 `MapScreen` 里的占位地图。
+- 地图显示：
+  - 当前设备定位图钉
+  - RTDB 中有实时位置的成员图钉
+  - 在线、离线、位置过期状态的不同透明度 / 颜色表达
+- `recenter` 按钮现在会让地图回到自己的实时位置，若自己还没有位置则回到第一个可用成员位置。
+- 增加 Google Maps 加载中、缺少 API key、加载失败的中英文字段。
+- 给 web workspace 增加 `@types/google.maps`，让 TypeScript 能识别 `google.maps` 全局类型。
+
+**验证**
+- `npm run build` 通过。
+- Vite 仍提示主 bundle 超过 500KB；当前主要是 Firebase SDK，Google Maps 是运行时脚本加载，
+  没有直接进入 Vite bundle。
+
+**注意**
+- 本次只完成地图和图钉；点击成员后的详情面板、距离、Google Maps 导航和轨迹显示尚未实现。
+- 需要在真实浏览器中确认 Maps API key 的 HTTP referrer 限制不会阻止 `localhost:5173`。
+
+**下一步**
+1. 在成员条点击成员，打开成员详情面板。
+2. 计算自己到目标成员的距离，并在成员条 / 详情面板显示。
+3. 增加 Google Maps 导航跳转。
+
+---
+
 ## 2026-06-03 — Phase 2 Task 5：成员监听与真实成员条 ✅
 
 **做了什么**
