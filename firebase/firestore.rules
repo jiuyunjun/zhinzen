@@ -58,8 +58,9 @@ service cloud.firestore {
 
       match /tracks/{deviceId}/points/{pointId} {
         allow read: if true;
-        // TODO(phase-3): rate-limit track writes; verify deviceSession ownership.
-        allow create: if roomIsActive(roomId);
+        // Track writes go through Cloud Functions so deviceSecret ownership can
+        // be verified server-side in the accountless device model.
+        allow create: if false;
         allow update, delete: if false;
       }
 

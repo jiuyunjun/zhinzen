@@ -627,7 +627,7 @@ rooms/{roomId}
   "expiresAt": "timestamp",
   "status": "active | expired | closed",
   "maxMembers": 20,
-  "trackRetentionMinutes": 120,
+  "trackRetentionMinutes": 1440,
   "createdByDeviceId": "string"
 }
 ```

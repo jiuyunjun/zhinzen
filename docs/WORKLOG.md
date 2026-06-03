@@ -5,6 +5,63 @@
 
 ---
 
+## 2026-06-03 — Phase 3 Task 2：轨迹写入后端接口 ✅
+
+**做了什么**
+- 新增 Cloud Function：
+  - `appendTrackPoint`
+- `appendTrackPoint` 校验：
+  - 房间存在
+  - 房间 `status` 为 `active`
+  - 房间未过期
+  - `deviceSessions/{deviceId}` 存在
+  - `sha256(roomId:deviceId:deviceSecret)` 与 session 中的 `secretHash` 匹配
+- 轨迹点写入路径：
+  - `rooms/{roomId}/tracks/{deviceId}/points/{pointId}`
+- 新轨迹点包含：
+  - `lat`
+  - `lng`
+  - `accuracy`
+  - `heading`
+  - `speed`
+  - `createdAt`
+  - `expiresAt`
+  - `segmentKind`
+- `segmentKind` 按速度派生：
+  - `stopped`
+  - `slow`
+  - `moving`
+  - `fast`
+- 新房间默认 `trackRetentionMinutes` 从 `120` 改为 `1440`。
+- Firestore rules 已改为禁止前端直接写 `tracks`，轨迹写入必须走 Cloud Functions。
+- `TrackPoint` shared type 增加 `expiresAt` 和 `segmentKind`。
+
+**部署**
+- 已部署：
+  - `appendTrackPoint(us-central1)`
+  - `createRoom(us-central1)`
+  - `joinRoom(us-central1)`
+- 已部署 Firestore rules。
+
+**验证**
+- `npm run build` 通过。
+- `firebase/functions` 的 `npm run build` 通过。
+- 使用 Firebase Web SDK 创建临时房间成功，新房间返回 `trackRetentionMinutes: 1440`。
+- 调用 `appendTrackPoint` 成功写入轨迹点。
+- 尝试用前端 SDK 直接写 Firestore tracks 被 rules 拒绝，返回 `PERMISSION_DENIED`。
+- 已删除验证产生的临时 Firestore 房间及其子集合。
+
+**注意**
+- Firebase CLI 继续提示 Node.js 20 runtime 已弃用，需要后续单独升级 Functions runtime。
+- 当前还没有把前端位置上传流程接到 `appendTrackPoint`。
+
+**下一步**
+1. 前端新增 `trackApi.appendTrackPoint`。
+2. `locationStore` 在共享位置时按较低频率写自己的轨迹点。
+3. 点击成员后读取并显示最近 24 小时轨迹。
+
+---
+
 ## 2026-06-03 — 轨迹与实时数据生命周期决策 ✅
 
 **做了什么**

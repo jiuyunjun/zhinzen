@@ -1,5 +1,7 @@
 import type { Millis } from './common';
 
+export type TrackSegmentKind = 'stopped' | 'slow' | 'moving' | 'fast';
+
 /**
  * A participant's latest live position. Lives in Realtime Database for low-latency
  * fan-out: `liveLocations/{roomId}/{deviceId}` (design.md §6.2).
@@ -30,4 +32,6 @@ export interface TrackPoint {
   heading: number | null;
   speed: number;
   createdAt: Millis;
+  expiresAt?: Millis;
+  segmentKind?: TrackSegmentKind;
 }

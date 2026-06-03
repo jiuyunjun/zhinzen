@@ -12,9 +12,11 @@ const ROOM_ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
 const ROOM_CODE_LENGTH = 10;
 const DEFAULT_ROOM_TTL_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_MAX_MEMBERS = 20;
-const DEFAULT_TRACK_RETENTION_MINUTES = 120;
+const DEFAULT_TRACK_RETENTION_MINUTES = 24 * 60;
+const MAX_TRACK_POINT_CLOCK_SKEW_MS = 5 * 60 * 1000;
 
 type Platform = 'web' | 'android' | 'ios';
+type SegmentKind = 'stopped' | 'slow' | 'moving' | 'fast';
 
 interface DeviceCapabilities {
   location: boolean;
@@ -42,6 +44,27 @@ interface RoomResponse {
   expiresAt: number;
   maxMembers: number;
   trackRetentionMinutes: number;
+}
+
+interface AppendTrackPointRequest {
+  roomId: string;
+  deviceId: string;
+  deviceSecret: string;
+  lat: number;
+  lng: number;
+  accuracy: number;
+  heading: number | null;
+  speed: number;
+  createdAt?: number;
+}
+
+interface AppendTrackPointResponse {
+  roomId: string;
+  deviceId: string;
+  pointId: string;
+  createdAt: number;
+  expiresAt: number;
+  segmentKind: SegmentKind;
 }
 
 const defaultCapabilities: DeviceCapabilities = {
@@ -133,6 +156,80 @@ function normalizeJoinRoomRequest(data: unknown): JoinRoomRequest {
     ...normalizeRoomRequest(data),
     roomId,
   };
+}
+
+function requireNumber(value: unknown, field: string): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    throw new HttpsError('invalid-argument', `${field} must be a finite number.`);
+  }
+
+  return value;
+}
+
+function normalizeHeading(value: unknown): number | null {
+  if (value === null || value === undefined) return null;
+  const heading = requireNumber(value, 'heading');
+  return ((heading % 360) + 360) % 360;
+}
+
+function normalizeAppendTrackPointRequest(data: unknown): AppendTrackPointRequest {
+  const payload = data && typeof data === 'object' ? (data as Record<string, unknown>) : {};
+  const roomId = normalizeRoomId(requireString(payload.roomId, 'roomId', 64));
+  const lat = requireNumber(payload.lat, 'lat');
+  const lng = requireNumber(payload.lng, 'lng');
+  const accuracy = requireNumber(payload.accuracy, 'accuracy');
+  const speed = requireNumber(payload.speed, 'speed');
+  const createdAt =
+    payload.createdAt === undefined ? undefined : requireNumber(payload.createdAt, 'createdAt');
+
+  if (!roomId) {
+    throw new HttpsError('invalid-argument', 'roomId is required.');
+  }
+
+  if (lat < -90 || lat > 90) {
+    throw new HttpsError('invalid-argument', 'lat is out of range.');
+  }
+
+  if (lng < -180 || lng > 180) {
+    throw new HttpsError('invalid-argument', 'lng is out of range.');
+  }
+
+  if (accuracy < 0) {
+    throw new HttpsError('invalid-argument', 'accuracy must be >= 0.');
+  }
+
+  if (speed < 0 || speed > 120) {
+    throw new HttpsError('invalid-argument', 'speed is out of range.');
+  }
+
+  return {
+    roomId,
+    deviceId: requireString(payload.deviceId, 'deviceId', 128),
+    deviceSecret: requireString(payload.deviceSecret, 'deviceSecret', 256),
+    lat,
+    lng,
+    accuracy,
+    heading: normalizeHeading(payload.heading),
+    speed,
+    createdAt,
+  };
+}
+
+function segmentKindForSpeed(speed: number): SegmentKind {
+  if (speed < 0.3) return 'stopped';
+  if (speed < 1.5) return 'slow';
+  if (speed < 5) return 'moving';
+  return 'fast';
+}
+
+function validTrackCreatedAt(inputCreatedAt: number | undefined, now: number): number {
+  if (inputCreatedAt === undefined) return now;
+
+  if (Math.abs(inputCreatedAt - now) > MAX_TRACK_POINT_CLOCK_SKEW_MS) {
+    return now;
+  }
+
+  return Math.trunc(inputCreatedAt);
 }
 
 function memberData(request: RoomRequest, now: number) {
@@ -282,3 +379,87 @@ export const joinRoom = onCall(async (request): Promise<RoomResponse> => {
     };
   });
 });
+
+export const appendTrackPoint = onCall(
+  async (request): Promise<AppendTrackPointResponse> => {
+    const payload = normalizeAppendTrackPointRequest(request.data);
+    const now = Date.now();
+    const roomRef = db.collection('rooms').doc(payload.roomId);
+    const sessionRef = roomRef.collection('deviceSessions').doc(payload.deviceId);
+    const memberRef = roomRef.collection('members').doc(payload.deviceId);
+    const secretHash = hashSecret(payload.roomId, payload.deviceId, payload.deviceSecret);
+
+    return db.runTransaction(async (transaction) => {
+      const [roomSnapshot, sessionSnapshot] = await Promise.all([
+        transaction.get(roomRef),
+        transaction.get(sessionRef),
+      ]);
+
+      if (!roomSnapshot.exists) {
+        throw new HttpsError('not-found', 'Room does not exist.');
+      }
+
+      const room = roomSnapshot.data();
+      if (!room || room.status !== 'active' || typeof room.expiresAt !== 'number') {
+        throw new HttpsError('failed-precondition', 'Room is not active.');
+      }
+
+      if (room.expiresAt <= now) {
+        throw new HttpsError('failed-precondition', 'Room has expired.');
+      }
+
+      if (!sessionSnapshot.exists || sessionSnapshot.data()?.secretHash !== secretHash) {
+        throw new HttpsError('permission-denied', 'Device session does not match.');
+      }
+
+      const retentionMinutes =
+        typeof room.trackRetentionMinutes === 'number'
+          ? room.trackRetentionMinutes
+          : DEFAULT_TRACK_RETENTION_MINUTES;
+      const createdAt = validTrackCreatedAt(payload.createdAt, now);
+      const expiresAt = Math.min(room.expiresAt, createdAt + retentionMinutes * 60 * 1000);
+      const segmentKind = segmentKindForSpeed(payload.speed);
+      const pointId = `${createdAt}_${randomBytes(3).toString('hex')}`;
+      const pointRef = roomRef
+        .collection('tracks')
+        .doc(payload.deviceId)
+        .collection('points')
+        .doc(pointId);
+
+      transaction.create(pointRef, {
+        lat: payload.lat,
+        lng: payload.lng,
+        accuracy: payload.accuracy,
+        heading: payload.heading,
+        speed: payload.speed,
+        createdAt,
+        expiresAt,
+        segmentKind,
+      });
+      transaction.set(
+        sessionRef,
+        {
+          lastVerifiedAt: now,
+        },
+        { merge: true },
+      );
+      transaction.set(
+        memberRef,
+        {
+          lastSeenAt: now,
+          sharingLocation: true,
+        },
+        { merge: true },
+      );
+
+      return {
+        roomId: payload.roomId,
+        deviceId: payload.deviceId,
+        pointId,
+        createdAt,
+        expiresAt,
+        segmentKind,
+      };
+    });
+  },
+);
