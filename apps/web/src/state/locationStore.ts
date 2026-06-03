@@ -1,0 +1,144 @@
+import type { LiveLocation } from '@zhinzen/shared-types';
+import { create } from 'zustand';
+
+import { writeLiveLocation } from '../lib/locationApi';
+
+type LocationPermissionState = 'unknown' | 'prompt' | 'granted' | 'denied';
+type LocationStatus = 'idle' | 'requesting' | 'watching' | 'error';
+
+interface StartSharingInput {
+  roomId: string;
+  deviceId: string;
+  displayName: string;
+}
+
+interface LocationState {
+  status: LocationStatus;
+  permission: LocationPermissionState;
+  current: LiveLocation | null;
+  error: GeolocationPositionError['code'] | 'unsupported' | null;
+  startSharing: (input: StartSharingInput) => Promise<boolean>;
+  stopSharing: () => Promise<void>;
+}
+
+const MIN_UPLOAD_INTERVAL_MS = 3000;
+
+let watchId: number | null = null;
+let activeInput: StartSharingInput | null = null;
+let lastUploadAt = 0;
+
+function positionToLiveLocation(
+  position: GeolocationPosition,
+  input: StartSharingInput,
+  sharingLocation: boolean,
+): LiveLocation {
+  return {
+    deviceId: input.deviceId,
+    displayName: input.displayName,
+    lat: position.coords.latitude,
+    lng: position.coords.longitude,
+    accuracy: position.coords.accuracy,
+    heading:
+      typeof position.coords.heading === 'number' && Number.isFinite(position.coords.heading)
+        ? position.coords.heading
+        : null,
+    speed:
+      typeof position.coords.speed === 'number' && Number.isFinite(position.coords.speed)
+        ? position.coords.speed
+        : 0,
+    updatedAt: Date.now(),
+    sharingLocation,
+  };
+}
+
+async function readPermission(): Promise<LocationPermissionState> {
+  if (!('permissions' in navigator)) return 'unknown';
+
+  try {
+    const status = await navigator.permissions.query({ name: 'geolocation' });
+    return status.state;
+  } catch {
+    return 'unknown';
+  }
+}
+
+export const useLocationStore = create<LocationState>((set, get) => ({
+  status: 'idle',
+  permission: 'unknown',
+  current: null,
+  error: null,
+  startSharing: async (input) => {
+    if (!('geolocation' in navigator)) {
+      set({ status: 'error', permission: 'denied', error: 'unsupported' });
+      return false;
+    }
+
+    if (watchId !== null) {
+      navigator.geolocation.clearWatch(watchId);
+      watchId = null;
+    }
+
+    activeInput = input;
+    lastUploadAt = 0;
+    set({ status: 'requesting', permission: await readPermission(), error: null });
+
+    return new Promise<boolean>((resolve) => {
+      let resolved = false;
+
+      watchId = navigator.geolocation.watchPosition(
+        (position) => {
+          const active = activeInput;
+          if (!active) return;
+
+          const liveLocation = positionToLiveLocation(position, active, true);
+          const now = Date.now();
+          set({ status: 'watching', permission: 'granted', current: liveLocation, error: null });
+
+          if (now - lastUploadAt >= MIN_UPLOAD_INTERVAL_MS) {
+            lastUploadAt = now;
+            void writeLiveLocation(active.roomId, liveLocation).catch(() => {
+              set({ status: 'error', error: null });
+            });
+          }
+
+          if (!resolved) {
+            resolved = true;
+            resolve(true);
+          }
+        },
+        (error) => {
+          set({ status: 'error', permission: error.code === error.PERMISSION_DENIED ? 'denied' : 'unknown', error: error.code });
+          if (!resolved) {
+            resolved = true;
+            resolve(false);
+          }
+        },
+        {
+          enableHighAccuracy: true,
+          maximumAge: 5000,
+          timeout: 12000,
+        },
+      );
+    });
+  },
+  stopSharing: async () => {
+    if (watchId !== null) {
+      navigator.geolocation.clearWatch(watchId);
+      watchId = null;
+    }
+
+    const active = activeInput;
+    const current = get().current;
+    activeInput = null;
+
+    if (active && current) {
+      await writeLiveLocation(active.roomId, {
+        ...current,
+        updatedAt: Date.now(),
+        sharingLocation: false,
+      });
+    }
+
+    set({ status: 'idle', current: null });
+  },
+}));

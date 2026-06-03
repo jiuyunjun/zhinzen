@@ -1,5 +1,7 @@
+import { useEffect } from 'react';
 import { color as tokens, font, mapThemes, withAlpha } from '@zhinzen/shared-ui';
 import { useDeviceStore } from '../../state/deviceStore';
+import { useLocationStore } from '../../state/locationStore';
 import { useRoomStore } from '../../state/roomStore';
 import { useUiStore } from '../../state/uiStore';
 import { Icon, type IconName } from '../../components/Icon';
@@ -18,8 +20,51 @@ export function MapScreen({ onLeave }: { onLeave: () => void }) {
   const roomId = useRoomStore((s) => s.roomId);
   const sharing = useRoomStore((s) => s.sharing);
   const setSharing = useRoomStore((s) => s.setSharing);
+  const startLocationSharing = useLocationStore((s) => s.startSharing);
+  const stopLocationSharing = useLocationStore((s) => s.stopSharing);
+  const locationStatus = useLocationStore((s) => s.status);
+  const locationError = useLocationStore((s) => s.error);
   const displayName = useDeviceStore((s) => s.displayName);
+  const deviceId = useDeviceStore((s) => s.deviceId);
   const { msg, flash } = useToast();
+
+  useEffect(() => {
+    if (!roomId) return;
+
+    let cancelled = false;
+
+    if (sharing) {
+      void startLocationSharing({ roomId, deviceId, displayName }).then((started) => {
+        if (!cancelled && started) flash(t('locationStarted'));
+        if (!cancelled && !started) setSharing(false);
+      });
+    } else {
+      void stopLocationSharing();
+    }
+
+    return () => {
+      cancelled = true;
+      void stopLocationSharing();
+    };
+  }, [
+    deviceId,
+    displayName,
+    flash,
+    roomId,
+    setSharing,
+    sharing,
+    startLocationSharing,
+    stopLocationSharing,
+    t,
+  ]);
+
+  useEffect(() => {
+    if (locationError === 1 || locationError === 'unsupported') {
+      flash(t('locationDenied'));
+    } else if (locationStatus === 'error') {
+      flash(t('locationUnavailable'));
+    }
+  }, [flash, locationError, locationStatus, t]);
 
   const onCopy = async () => {
     if (!roomId) return;

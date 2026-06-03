@@ -5,6 +5,37 @@
 
 ---
 
+## 2026-06-03 — Phase 2 Task 4：自己的实时位置上传 ✅
+
+**做了什么**
+- 新增 `apps/web/src/lib/locationApi.ts`：
+  - `writeLiveLocation(roomId, location)`
+  - `clearLiveLocation(roomId, deviceId)`
+  - RTDB 路径统一为 `liveLocations/{roomId}/{deviceId}`。
+- 新增 `apps/web/src/state/locationStore.ts`：
+  - `startSharing`
+  - `stopSharing`
+  - `status`
+  - `permission`
+  - `current`
+  - `error`
+- 使用 `navigator.geolocation.watchPosition` 获取系统融合定位结果。
+- 共享开启时上传自己的 `LiveLocation` 到 RTDB。
+- 最小上传间隔：3 秒。
+- 共享关闭或离开地图页面时停止 watcher，并写入一次 `sharingLocation: false`。
+- 如果定位权限被拒绝或定位不可用，自动关闭 UI 的共享状态，避免界面显示“共享中”但实际未上传。
+- `MapScreen` 增加定位开始、权限拒绝、定位不可用的 toast。
+
+**验证**
+- `npm run build` 通过。
+
+**下一步**
+1. 在真实手机浏览器手动验证位置权限与 RTDB 写入。
+2. 新增 `membersStore`，监听 Firestore 成员列表和 RTDB liveLocations。
+3. 成员条从硬编码 1 人切到真实成员状态。
+
+---
+
 ## 2026-06-03 — Phase 2 Task 3：前端房间流程接后端 ✅
 
 **做了什么**
