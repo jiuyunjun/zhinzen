@@ -6,6 +6,8 @@ import react from '@vitejs/plugin-react';
 // them as part of the app build — no separate package build step needed.
 export default defineConfig({
   plugins: [react()],
+  // Load .env files from the monorepo root, where the user keeps .env.local.
+  envDir: '../..',
   server: {
     host: true,
     port: 5173,
