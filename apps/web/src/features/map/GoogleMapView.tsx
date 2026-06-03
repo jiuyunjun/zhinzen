@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { LiveLocation } from '@zhinzen/shared-types';
+import type { LiveLocation, TrackPoint } from '@zhinzen/shared-types';
 import { color as tokens, font, withAlpha } from '@zhinzen/shared-ui';
 
 import { isMapsConfigured } from '../../lib/env';
@@ -14,6 +14,7 @@ interface GoogleMapViewProps {
   ownDeviceId: string;
   recenterSignal: number;
   selectedDeviceId: string | null;
+  trackPoints: TrackPoint[];
   onSelectMember: (deviceId: string) => void;
 }
 
@@ -51,12 +52,14 @@ export function GoogleMapView({
   ownDeviceId,
   recenterSignal,
   selectedDeviceId,
+  trackPoints,
   onSelectMember,
 }: GoogleMapViewProps) {
   const t = useUiStore((s) => s.t);
   const mapEl = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<google.maps.Map | null>(null);
   const markersRef = useRef<Map<string, google.maps.Marker>>(new Map());
+  const trackSegmentsRef = useRef<google.maps.Polyline[]>([]);
   const initializedRef = useRef(false);
   const [loadState, setLoadState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
 
@@ -96,6 +99,8 @@ export function GoogleMapView({
       cancelled = true;
       clearMarkers(markersRef.current);
       markersRef.current.clear();
+      clearTrackSegments(trackSegmentsRef.current);
+      trackSegmentsRef.current = [];
       mapRef.current = null;
       initializedRef.current = false;
     };
@@ -112,6 +117,13 @@ export function GoogleMapView({
       fitMapToPins(map, pins);
     }
   }, [onSelectMember, pins, selectedDeviceId]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    syncTrackSegments(map, trackSegmentsRef.current, trackPoints);
+  }, [trackPoints]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -255,6 +267,80 @@ function fitMapToPins(map: google.maps.Map, pins: MapPin[]): void {
 
 function clearMarkers(markers: Map<string, google.maps.Marker>): void {
   for (const marker of markers.values()) marker.setMap(null);
+}
+
+function syncTrackSegments(
+  map: google.maps.Map,
+  segments: google.maps.Polyline[],
+  points: TrackPoint[],
+): void {
+  clearTrackSegments(segments);
+  segments.length = 0;
+
+  const ordered = points
+    .filter((point) => Number.isFinite(point.lat) && Number.isFinite(point.lng))
+    .sort((a, b) => a.createdAt - b.createdAt);
+
+  for (let index = 1; index < ordered.length; index += 1) {
+    const previous = ordered[index - 1];
+    const current = ordered[index];
+    const segment = new google.maps.Polyline({
+      map,
+      path: [
+        { lat: previous.lat, lng: previous.lng },
+        { lat: current.lat, lng: current.lng },
+      ],
+      geodesic: true,
+      strokeColor: colorForTrackSpeed((previous.speed + current.speed) / 2),
+      strokeOpacity: 0.82,
+      strokeWeight: 6,
+      zIndex: 6,
+    });
+    segments.push(segment);
+  }
+}
+
+function clearTrackSegments(segments: google.maps.Polyline[]): void {
+  for (const segment of segments) segment.setMap(null);
+}
+
+function colorForTrackSpeed(speed: number): string {
+  const stops = [
+    { speed: 0, color: [220, 38, 38] },
+    { speed: 1.5, color: [249, 115, 22] },
+    { speed: 3, color: [234, 179, 8] },
+    { speed: 5, color: [34, 197, 94] },
+    { speed: 10, color: [22, 163, 74] },
+  ] as const;
+  const value = Number.isFinite(speed) ? Math.max(0, speed) : 0;
+
+  for (let index = 1; index < stops.length; index += 1) {
+    const previous = stops[index - 1];
+    const current = stops[index];
+    if (value <= current.speed) {
+      const ratio = (value - previous.speed) / (current.speed - previous.speed);
+      return rgbToHex(interpolateRgb(previous.color, current.color, ratio));
+    }
+  }
+
+  return rgbToHex(stops[stops.length - 1].color);
+}
+
+function interpolateRgb(
+  from: readonly [number, number, number],
+  to: readonly [number, number, number],
+  ratio: number,
+): [number, number, number] {
+  const clamped = Math.min(1, Math.max(0, ratio));
+  return [
+    Math.round(from[0] + (to[0] - from[0]) * clamped),
+    Math.round(from[1] + (to[1] - from[1]) * clamped),
+    Math.round(from[2] + (to[2] - from[2]) * clamped),
+  ];
+}
+
+function rgbToHex(rgb: readonly [number, number, number]): string {
+  return `#${rgb.map((part) => part.toString(16).padStart(2, '0')).join('')}`;
 }
 
 function toLatLng(location: LiveLocation | null): google.maps.LatLngLiteral | null {

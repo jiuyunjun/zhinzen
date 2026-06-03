@@ -5,6 +5,34 @@
 
 ---
 
+## 2026-06-03 — Phase 3 Task 4：前端轨迹读取与地图绘制 ✅
+
+**做了什么**
+- `trackApi` 增加 `fetchRecentTrackPoints`，按设备读取最近 24 小时轨迹：
+  - `rooms/{roomId}/tracks/{deviceId}/points`
+  - `where createdAt >= now - 24h`
+  - `orderBy createdAt asc`
+- `MapScreen` 默认读取自己的轨迹。
+- 点击成员后切换读取该成员轨迹。
+- 轨迹读取每 15 秒刷新一次，便于 HTTPS 真机测试时看到新点追加。
+- `GoogleMapView` 在 Google Map 上绘制轨迹线段。
+- 轨迹线按相邻点平均速度做红到绿的线性颜色表达：
+  - 停留 / 极慢偏红。
+  - 慢速偏橙。
+  - 中速偏黄绿。
+  - 快速偏绿。
+
+**验证**
+- `npm run build` 通过。
+- Vite 仍提示主 bundle 超过 500KB，后续应单独做 Firebase 代码拆分。
+
+**下一步**
+1. 部署 Firebase Hosting，提供 HTTPS 测试地址。
+2. 真机测试位置权限、RTDB 实时点、Firestore 轨迹点和轨迹线。
+3. 根据真机结果调整轨迹采样频率和线段颜色阈值。
+
+---
+
 ## 2026-06-03 — Phase 3 Task 3：前端轨迹点写入 ✅
 
 **做了什么**

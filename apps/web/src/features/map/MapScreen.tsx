@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import type { TrackPoint } from '@zhinzen/shared-types';
 import { color as tokens, font, mapThemes, withAlpha } from '@zhinzen/shared-ui';
 import { useDeviceStore } from '../../state/deviceStore';
 import { useLocationStore } from '../../state/locationStore';
@@ -9,6 +10,7 @@ import { Icon, type IconName } from '../../components/Icon';
 import { Toast, useToast } from '../../components/Toast';
 import { LangToggle } from '../../components/LangToggle';
 import { formatRoomCode, inviteLink } from '../../lib/roomCode';
+import { fetchRecentTrackPoints } from '../../lib/trackApi';
 import { GoogleMapView } from './GoogleMapView';
 import { MemberDetailPanel } from './MemberDetailPanel';
 import { MemberStrip } from './MemberStrip';
@@ -35,6 +37,7 @@ export function MapScreen({ onLeave }: { onLeave: () => void }) {
   const deviceSecret = useDeviceStore((s) => s.deviceSecret);
   const [recenterSignal, setRecenterSignal] = useState(0);
   const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
+  const [trackPoints, setTrackPoints] = useState<TrackPoint[]>([]);
   const { msg, flash } = useToast();
 
   const selfMemberLocation = members.find((member) => member.isSelf)?.location ?? null;
@@ -43,6 +46,7 @@ export function MapScreen({ onLeave }: { onLeave: () => void }) {
     () => members.find((member) => member.member.deviceId === selectedDeviceId) ?? null,
     [members, selectedDeviceId],
   );
+  const trackDeviceId = selectedDeviceId ?? deviceId;
 
   useEffect(() => {
     if (!roomId) return;
@@ -96,6 +100,33 @@ export function MapScreen({ onLeave }: { onLeave: () => void }) {
     }
   }, [members, selectedDeviceId]);
 
+  useEffect(() => {
+    if (!roomId || !trackDeviceId) {
+      setTrackPoints([]);
+      return;
+    }
+
+    let cancelled = false;
+    const loadTrack = () => {
+      const since = Date.now() - 24 * 60 * 60 * 1000;
+      void fetchRecentTrackPoints(roomId, trackDeviceId, since)
+        .then((points) => {
+          if (!cancelled) setTrackPoints(points);
+        })
+        .catch(() => {
+          if (!cancelled) setTrackPoints([]);
+        });
+    };
+
+    loadTrack();
+    const intervalId = window.setInterval(loadTrack, 15000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [roomId, trackDeviceId]);
+
   const onCopy = async () => {
     if (!roomId) return;
     try {
@@ -133,6 +164,7 @@ export function MapScreen({ onLeave }: { onLeave: () => void }) {
         ownDeviceId={deviceId}
         recenterSignal={recenterSignal}
         selectedDeviceId={selectedDeviceId}
+        trackPoints={trackPoints}
         onSelectMember={setSelectedDeviceId}
       />
 
