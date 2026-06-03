@@ -5,6 +5,30 @@
 
 ---
 
+## 2026-06-03 — Web 后台定位限制提示与前台刷新 ✅
+
+**做了什么**
+- `locationStore` 新增 `refreshNow()`。
+- 页面回到前台时使用 `getCurrentPosition` 立即刷新并强制写一次 RTDB 实时位置。
+- 如果满足轨迹间隔，回前台刷新也会补一次轨迹点。
+- `MapScreen` 监听 `document.visibilitychange`：
+  - 后台时提示“浏览器后台可能暂停位置更新”。
+  - 回前台时提示“已回到前台，正在刷新位置”并触发 `refreshNow()`。
+- `design.md` 补充 Web 后台定位限制：
+  - Web 不能承诺浏览器后台持续获取位置。
+  - 真正可靠的后台持续共享放到 Android App Foreground Service。
+- i18n 增加后台限制和前台刷新文案。
+
+**验证**
+- `npm run build` 通过。
+- Vite 仍提示主 bundle 超过 500KB，后续应单独做 Firebase 代码拆分。
+
+**下一步**
+1. 部署 Hosting，真机验证后台提示和回前台刷新。
+2. Android 阶段实现 Foreground Service 后台持续共享。
+
+---
+
 ## 2026-06-03 — 地图抖动与离开房间入口调整 ✅
 
 **做了什么**

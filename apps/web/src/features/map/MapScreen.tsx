@@ -26,6 +26,7 @@ export function MapScreen({ onLeave }: { onLeave: () => void }) {
   const sharing = useRoomStore((s) => s.sharing);
   const setSharing = useRoomStore((s) => s.setSharing);
   const startLocationSharing = useLocationStore((s) => s.startSharing);
+  const refreshLocationNow = useLocationStore((s) => s.refreshNow);
   const stopLocationSharing = useLocationStore((s) => s.stopSharing);
   const locationStatus = useLocationStore((s) => s.status);
   const locationError = useLocationStore((s) => s.error);
@@ -95,6 +96,23 @@ export function MapScreen({ onLeave }: { onLeave: () => void }) {
       flash(t('locationUnavailable'));
     }
   }, [flash, locationError, locationStatus, t]);
+
+  useEffect(() => {
+    const onVisibilityChange = () => {
+      if (!sharing) return;
+
+      if (document.visibilityState === 'hidden') {
+        flash(t('backgroundLocationLimited'));
+        return;
+      }
+
+      void refreshLocationNow();
+      flash(t('foregroundLocationRefresh'));
+    };
+
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', onVisibilityChange);
+  }, [flash, refreshLocationNow, sharing, t]);
 
   useEffect(() => {
     if (selectedDeviceId && !members.some((member) => member.member.deviceId === selectedDeviceId)) {

@@ -20,6 +20,7 @@ interface LocationState {
   current: LiveLocation | null;
   error: GeolocationPositionError['code'] | 'unsupported' | null;
   startSharing: (input: StartSharingInput) => Promise<boolean>;
+  refreshNow: () => Promise<boolean>;
   stopSharing: () => Promise<void>;
 }
 
@@ -53,6 +54,41 @@ function positionToLiveLocation(
     updatedAt: Date.now(),
     sharingLocation,
   };
+}
+
+async function publishLocation(
+  position: GeolocationPosition,
+  set: (state: Partial<LocationState>) => void,
+  forceLiveUpload = false,
+): Promise<void> {
+  const active = activeInput;
+  if (!active) return;
+
+  const liveLocation = positionToLiveLocation(position, active, true);
+  const now = Date.now();
+  set({ status: 'watching', permission: 'granted', current: liveLocation, error: null });
+
+  if (forceLiveUpload || now - lastUploadAt >= MIN_UPLOAD_INTERVAL_MS) {
+    lastUploadAt = now;
+    await writeLiveLocation(active.roomId, liveLocation);
+  }
+
+  if (now - lastTrackAt >= MIN_TRACK_INTERVAL_MS) {
+    lastTrackAt = now;
+    void appendTrackPoint({
+      roomId: active.roomId,
+      deviceId: active.deviceId,
+      deviceSecret: active.deviceSecret,
+      lat: liveLocation.lat,
+      lng: liveLocation.lng,
+      accuracy: liveLocation.accuracy,
+      heading: liveLocation.heading,
+      speed: liveLocation.speed,
+      createdAt: liveLocation.updatedAt,
+    }).catch(() => {
+      // Track persistence is secondary; live sharing should continue.
+    });
+  }
 }
 
 async function readPermission(): Promise<LocationPermissionState> {
@@ -92,36 +128,9 @@ export const useLocationStore = create<LocationState>((set, get) => ({
 
       watchId = navigator.geolocation.watchPosition(
         (position) => {
-          const active = activeInput;
-          if (!active) return;
-
-          const liveLocation = positionToLiveLocation(position, active, true);
-          const now = Date.now();
-          set({ status: 'watching', permission: 'granted', current: liveLocation, error: null });
-
-          if (now - lastUploadAt >= MIN_UPLOAD_INTERVAL_MS) {
-            lastUploadAt = now;
-            void writeLiveLocation(active.roomId, liveLocation).catch(() => {
-              set({ status: 'error', error: null });
-            });
-          }
-
-          if (now - lastTrackAt >= MIN_TRACK_INTERVAL_MS) {
-            lastTrackAt = now;
-            void appendTrackPoint({
-              roomId: active.roomId,
-              deviceId: active.deviceId,
-              deviceSecret: active.deviceSecret,
-              lat: liveLocation.lat,
-              lng: liveLocation.lng,
-              accuracy: liveLocation.accuracy,
-              heading: liveLocation.heading,
-              speed: liveLocation.speed,
-              createdAt: liveLocation.updatedAt,
-            }).catch(() => {
-              // Track persistence is secondary; live sharing should continue.
-            });
-          }
+          void publishLocation(position, set).catch(() => {
+            set({ status: 'error', error: null });
+          });
 
           if (!resolved) {
             resolved = true;
@@ -139,6 +148,31 @@ export const useLocationStore = create<LocationState>((set, get) => ({
           enableHighAccuracy: true,
           maximumAge: 5000,
           timeout: 12000,
+        },
+      );
+    });
+  },
+  refreshNow: async () => {
+    if (!activeInput || !('geolocation' in navigator)) return false;
+
+    return new Promise<boolean>((resolve) => {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          void publishLocation(position, set, true)
+            .then(() => resolve(true))
+            .catch(() => {
+              set({ status: 'error', error: null });
+              resolve(false);
+            });
+        },
+        (error) => {
+          set({ status: 'error', permission: error.code === error.PERMISSION_DENIED ? 'denied' : 'unknown', error: error.code });
+          resolve(false);
+        },
+        {
+          enableHighAccuracy: true,
+          maximumAge: 0,
+          timeout: 10000,
         },
       );
     });
