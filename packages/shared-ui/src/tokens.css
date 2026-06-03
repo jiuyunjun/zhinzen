@@ -1,0 +1,29 @@
+/**
+ * CSS custom properties mirroring src/tokens.ts. Import once at the app root
+ * (`import '@zhinzen/shared-ui/tokens.css'`) to expose the design tokens to plain
+ * CSS / CSS Modules. Keep values in sync with tokens.ts.
+ */
+:root {
+  /* type */
+  --zz-font-sans: 'Hanken Grotesk', -apple-system, 'PingFang SC', 'Hiragino Sans GB',
+    'Microsoft YaHei', 'Noto Sans SC', system-ui, sans-serif;
+  --zz-font-mono: 'DM Mono', 'PingFang SC', 'Microsoft YaHei', ui-monospace, monospace;
+
+  /* semantic palette */
+  --zz-self: oklch(0.6 0.15 255);
+  --zz-self-soft: oklch(0.6 0.15 255 / 0.16);
+  --zz-target: oklch(0.56 0.19 300);
+  --zz-online: oklch(0.68 0.16 150);
+  --zz-stale: oklch(0.74 0.14 75);
+  --zz-offline: oklch(0.68 0.02 250);
+  --zz-danger: oklch(0.6 0.2 25);
+
+  /* ink / lines */
+  --zz-ink: oklch(0.22 0.015 260);
+  --zz-ink-soft: oklch(0.5 0.02 260);
+  --zz-ink-faint: oklch(0.66 0.015 260);
+  --zz-line: oklch(0.9 0.008 260);
+
+  /* surfaces */
+  --zz-bg: oklch(0.98 0.004 250);
+}

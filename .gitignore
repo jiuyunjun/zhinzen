@@ -1,1 +1,32 @@
+# history
 .history/
+
+# dependencies
+node_modules/
+.pnp/
+.pnp.js
+
+# build output
+dist/
+build/
+*.tsbuildinfo
+
+# environment / secrets
+.env
+.env.*
+!.env.example
+
+# firebase
+.firebase/
+firebase-debug.log
+firestore-debug.log
+database-debug.log
+ui-debug.log
+.runtimeconfig.json
+serviceAccountKey*.json
+
+# editor / os
+.DS_Store
+Thumbs.db
+.idea/
+*.log

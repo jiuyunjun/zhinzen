@@ -1,0 +1,78 @@
+rules_version = '2';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Zhinzen Firestore rules — v0 BASELINE (design.md §15, agents.md §6).
+//
+// IMPORTANT: this is an intentionally simplified MVP ruleset, NOT production-grade
+// security. Because the product has no account system, ownership of a `deviceId`
+// cannot be proven by security rules alone. The intended hardening (per design.md)
+// is: high-entropy `roomId` acting as a capability, Cloud Functions performing
+// `deviceSecret` validation on writes, and Firebase App Check rejecting non-app
+// clients. Those are TODOs for later phases — do not treat these rules as final.
+//
+// Access model today (capability-URL style): knowing the unguessable `roomId`
+// grants read access to that room. Writes are scoped per document with structural
+// checks and TODOs marking where server-side device validation must be added.
+// ─────────────────────────────────────────────────────────────────────────────
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function roomExists(roomId) {
+      return exists(/databases/$(database)/documents/rooms/$(roomId));
+    }
+
+    function room(roomId) {
+      return get(/databases/$(database)/documents/rooms/$(roomId)).data;
+    }
+
+    // A room is writable by members only while it is active and unexpired.
+    function roomIsActive(roomId) {
+      return roomExists(roomId)
+        && room(roomId).status == 'active'
+        && room(roomId).expiresAt > request.time.toMillis();
+    }
+
+    match /rooms/{roomId} {
+      // Reading a room requires knowing its high-entropy id (capability URL).
+      allow read: if true;
+
+      // Room creation. TODO(phase-2): move to a Cloud Function so roomId entropy,
+      // rate limiting and the creator's deviceSession are enforced server-side.
+      allow create: if request.resource.data.status == 'active'
+        && request.resource.data.expiresAt is int
+        && request.resource.data.maxMembers is int;
+
+      // Rooms expire/close but their core identity is immutable client-side.
+      // TODO(phase-2): restrict status transitions to Cloud Functions.
+      allow update: if false;
+      allow delete: if false;
+
+      match /members/{deviceId} {
+        allow read: if true;
+        // TODO(phase-2): require a verified deviceSession for {deviceId} before
+        // allowing a device to write its own member doc.
+        allow write: if roomIsActive(roomId)
+          && request.resource.data.deviceId == deviceId;
+      }
+
+      match /tracks/{deviceId}/points/{pointId} {
+        allow read: if true;
+        // TODO(phase-3): rate-limit track writes; verify deviceSession ownership.
+        allow create: if roomIsActive(roomId);
+        allow update, delete: if false;
+      }
+
+      match /deviceSessions/{deviceId} {
+        // Sessions store only a secret hash; never world-readable.
+        // TODO(phase-2): all reads/writes go through Cloud Functions.
+        allow read, write: if false;
+      }
+    }
+
+    // Anything not explicitly matched is denied.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

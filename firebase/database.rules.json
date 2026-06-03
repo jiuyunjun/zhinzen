@@ -1,0 +1,32 @@
+{
+  "//": "Zhinzen Realtime Database rules — v0 BASELINE (design.md §15). Holds live",
+  "//1": "locations for low-latency fan-out: liveLocations/{roomId}/{deviceId}.",
+  "//2": "Same caveat as firestore.rules: this is NOT production-grade. deviceId",
+  "//3": "ownership cannot be proven without server validation. Hardening (Cloud",
+  "//4": "Functions deviceSecret check + App Check) is a TODO for later phases.",
+  "rules": {
+    "liveLocations": {
+      "$roomId": {
+        ".read": true,
+        "$deviceId": {
+          ".write": true,
+          ".validate": "newData.hasChildren(['deviceId', 'lat', 'lng', 'updatedAt', 'sharingLocation'])",
+          "deviceId": { ".validate": "newData.val() === $deviceId" },
+          "lat": { ".validate": "newData.isNumber() && newData.val() >= -90 && newData.val() <= 90" },
+          "lng": { ".validate": "newData.isNumber() && newData.val() >= -180 && newData.val() <= 180" },
+          "accuracy": { ".validate": "newData.isNumber() && newData.val() >= 0" },
+          "heading": { ".validate": "newData.isNumber() || newData.val() === null" },
+          "speed": { ".validate": "newData.isNumber()" },
+          "updatedAt": { ".validate": "newData.isNumber()" },
+          "sharingLocation": { ".validate": "newData.isBoolean()" },
+          "displayName": { ".validate": "newData.isString()" },
+          "$other": { ".validate": false }
+        }
+      }
+    },
+    "$other": {
+      ".read": false,
+      ".write": false
+    }
+  }
+}

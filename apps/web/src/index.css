@@ -1,0 +1,23 @@
+@import '@zhinzen/shared-ui/tokens.css';
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+}
+
+body {
+  font-family: var(--zz-font-sans);
+  color: var(--zz-ink);
+  background: var(--zz-bg);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#root {
+  min-height: 100vh;
+}

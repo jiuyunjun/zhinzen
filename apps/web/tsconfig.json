@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "noEmit": true,
+    "types": ["vite/client"],
+    "paths": {
+      "@zhinzen/shared-types": ["../../packages/shared-types/src/index.ts"],
+      "@zhinzen/geo-utils": ["../../packages/geo-utils/src/index.ts"],
+      "@zhinzen/shared-ui": ["../../packages/shared-ui/src/index.ts"]
+    }
+  },
+  "include": ["src", "vite.config.ts"]
+}
