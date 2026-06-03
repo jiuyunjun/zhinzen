@@ -13,6 +13,8 @@ interface GoogleMapViewProps {
   ownDisplayName: string;
   ownDeviceId: string;
   recenterSignal: number;
+  selectedDeviceId: string | null;
+  onSelectMember: (deviceId: string) => void;
 }
 
 interface MapPin {
@@ -48,6 +50,8 @@ export function GoogleMapView({
   ownDisplayName,
   ownDeviceId,
   recenterSignal,
+  selectedDeviceId,
+  onSelectMember,
 }: GoogleMapViewProps) {
   const t = useUiStore((s) => s.t);
   const mapEl = useRef<HTMLDivElement | null>(null);
@@ -101,13 +105,13 @@ export function GoogleMapView({
     const map = mapRef.current;
     if (!map) return;
 
-    syncMarkers(map, markersRef.current, pins);
+    syncMarkers(map, markersRef.current, pins, selectedDeviceId, onSelectMember);
 
     if (!initializedRef.current) {
       initializedRef.current = true;
       fitMapToPins(map, pins);
     }
-  }, [pins]);
+  }, [onSelectMember, pins, selectedDeviceId]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -161,6 +165,8 @@ function syncMarkers(
   map: google.maps.Map,
   markers: Map<string, google.maps.Marker>,
   pins: MapPin[],
+  selectedDeviceId: string | null,
+  onSelectMember: (deviceId: string) => void,
 ): void {
   const activeIds = new Set(pins.map((pin) => pin.id));
 
@@ -179,7 +185,7 @@ function syncMarkers(
     if (existing) {
       existing.setPosition(position);
       existing.setTitle(title);
-      existing.setIcon(markerIcon(pin));
+      existing.setIcon(markerIcon(pin, pin.id === selectedDeviceId));
       existing.setOpacity(opacityForStatus(pin.status));
       existing.setLabel(markerLabel(title));
       continue;
@@ -191,24 +197,25 @@ function syncMarkers(
         map,
         position,
         title,
-        icon: markerIcon(pin),
+        icon: markerIcon(pin, pin.id === selectedDeviceId),
         label: markerLabel(title),
         opacity: opacityForStatus(pin.status),
         zIndex: pin.isSelf ? 20 : 10,
       }),
     );
+    markers.get(pin.id)?.addListener('click', () => onSelectMember(pin.id));
   }
 }
 
-function markerIcon(pin: MapPin): google.maps.Symbol {
+function markerIcon(pin: MapPin, selected: boolean): google.maps.Symbol {
   return {
     path: google.maps.SymbolPath.CIRCLE,
-    scale: pin.isSelf ? 12 : 10,
+    scale: selected ? 14 : pin.isSelf ? 12 : 10,
     fillColor: pin.isSelf ? PIN_COLORS.self : PIN_COLORS[pin.status],
     fillOpacity: 1,
     strokeColor: '#ffffff',
     strokeOpacity: 1,
-    strokeWeight: pin.isSelf ? 4 : 3,
+    strokeWeight: selected ? 5 : pin.isSelf ? 4 : 3,
   };
 }
 

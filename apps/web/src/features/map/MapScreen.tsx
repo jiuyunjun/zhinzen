@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { color as tokens, font, mapThemes, withAlpha } from '@zhinzen/shared-ui';
 import { useDeviceStore } from '../../state/deviceStore';
 import { useLocationStore } from '../../state/locationStore';
@@ -10,6 +10,7 @@ import { Toast, useToast } from '../../components/Toast';
 import { LangToggle } from '../../components/LangToggle';
 import { formatRoomCode, inviteLink } from '../../lib/roomCode';
 import { GoogleMapView } from './GoogleMapView';
+import { MemberDetailPanel } from './MemberDetailPanel';
 import { MemberStrip } from './MemberStrip';
 
 /**
@@ -32,7 +33,15 @@ export function MapScreen({ onLeave }: { onLeave: () => void }) {
   const displayName = useDeviceStore((s) => s.displayName);
   const deviceId = useDeviceStore((s) => s.deviceId);
   const [recenterSignal, setRecenterSignal] = useState(0);
+  const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
   const { msg, flash } = useToast();
+
+  const selfMemberLocation = members.find((member) => member.isSelf)?.location ?? null;
+  const effectiveOwnLocation = ownLocation ?? selfMemberLocation;
+  const selectedMember = useMemo(
+    () => members.find((member) => member.member.deviceId === selectedDeviceId) ?? null,
+    [members, selectedDeviceId],
+  );
 
   useEffect(() => {
     if (!roomId) return;
@@ -79,6 +88,12 @@ export function MapScreen({ onLeave }: { onLeave: () => void }) {
     }
   }, [flash, locationError, locationStatus, t]);
 
+  useEffect(() => {
+    if (selectedDeviceId && !members.some((member) => member.member.deviceId === selectedDeviceId)) {
+      setSelectedDeviceId(null);
+    }
+  }, [members, selectedDeviceId]);
+
   const onCopy = async () => {
     if (!roomId) return;
     try {
@@ -115,6 +130,8 @@ export function MapScreen({ onLeave }: { onLeave: () => void }) {
         ownDisplayName={displayName}
         ownDeviceId={deviceId}
         recenterSignal={recenterSignal}
+        selectedDeviceId={selectedDeviceId}
+        onSelectMember={setSelectedDeviceId}
       />
 
       {/* top status bar */}
@@ -233,7 +250,20 @@ export function MapScreen({ onLeave }: { onLeave: () => void }) {
             margin: '0 auto 14px',
           }}
         />
-        <MemberStrip members={members} selfName={displayName} sharing={sharing} />
+        <MemberStrip
+          members={members}
+          selfName={displayName}
+          sharing={sharing}
+          selectedDeviceId={selectedDeviceId}
+          onSelect={setSelectedDeviceId}
+        />
+        {selectedMember && (
+          <MemberDetailPanel
+            member={selectedMember}
+            ownLocation={effectiveOwnLocation}
+            onClose={() => setSelectedDeviceId(null)}
+          />
+        )}
         <button
           type="button"
           onClick={onLeave}

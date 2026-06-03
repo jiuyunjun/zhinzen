@@ -10,10 +10,14 @@ export function MemberStrip({
   members,
   selfName,
   sharing,
+  selectedDeviceId,
+  onSelect,
 }: {
   members: MemberView[];
   selfName: string;
   sharing: boolean;
+  selectedDeviceId: string | null;
+  onSelect: (deviceId: string) => void;
 }) {
   const t = useUiStore((s) => s.t);
   const me = selfName.trim() || t('you');
@@ -63,21 +67,36 @@ export function MemberStrip({
 
       <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 4 }}>
         {visibleMembers.map((member) => (
-          <MemberChip key={member.member.deviceId} member={member} />
+          <MemberChip
+            key={member.member.deviceId}
+            member={member}
+            selected={member.member.deviceId === selectedDeviceId}
+            onSelect={onSelect}
+          />
         ))}
       </div>
     </div>
   );
 }
 
-function MemberChip({ member }: { member: MemberView }) {
+function MemberChip({
+  member,
+  selected,
+  onSelect,
+}: {
+  member: MemberView;
+  selected: boolean;
+  onSelect: (deviceId: string) => void;
+}) {
   const t = useUiStore((s) => s.t);
   const name = member.member.displayName.trim() || t('you');
   const accent = member.isSelf ? tokens.self : tokens.target;
   const statusColor = colorForStatus(member.status);
 
   return (
-    <div
+    <button
+      type="button"
+      onClick={() => onSelect(member.member.deviceId)}
       style={{
         display: 'flex',
         flexDirection: 'column',
@@ -85,6 +104,12 @@ function MemberChip({ member }: { member: MemberView }) {
         gap: 7,
         width: 72,
         flexShrink: 0,
+        border: 'none',
+        padding: '2px 0',
+        borderRadius: 14,
+        background: selected ? withAlpha(accent, 0.1) : 'transparent',
+        cursor: 'pointer',
+        fontFamily: 'inherit',
       }}
     >
       <div style={{ position: 'relative' }}>
@@ -137,7 +162,7 @@ function MemberChip({ member }: { member: MemberView }) {
           {labelForStatus(member.status, t)}
         </div>
       </div>
-    </div>
+    </button>
   );
 }
 
