@@ -5,6 +5,53 @@
 
 ---
 
+## 2026-06-03 — Phase 2 Task 3：前端房间流程接后端 ✅
+
+**做了什么**
+- 新增 `apps/web/src/lib/roomApi.ts`，封装 callable functions：
+  - `createRoom`
+  - `joinRoom`
+- 将 `state/roomStore.ts` 从本地 mock 切换为异步后端调用。
+- `roomStore` 新增：
+  - `pendingJoinCode`
+  - `busy`
+  - `error`
+  - `clearError`
+- 邀请链接打开后不再直接进入地图，而是先带着房间码进入加入流程，由后端校验房间是否存在、
+  是否过期、是否满员、设备 session 是否匹配。
+- `RoomChoice` 增加创建/加入中的禁用状态和错误提示。
+- i18n 增加后端房间错误文案。
+
+**部署**
+- 已部署 Cloud Functions 到 `zhinzen`：
+  - `createRoom(us-central1)`
+  - `joinRoom(us-central1)`
+  - `health(us-central1)`
+- 首次全量部署时 `createRoom` 因 Cloud Run service 缺失进入失败状态；随后用
+  `firebase deploy --only functions:createRoom --project zhinzen --force` 重试成功。
+- `createRoom` 重试成功后缺少匿名调用权限，已用 `gcloud run services add-iam-policy-binding`
+  给 `createroom` 补充 `roles/run.invoker` / `allUsers`。
+- 已让 Firebase CLI 自动配置 `us-central1` 的 Functions artifact cleanup policy：
+  1 天以上镜像自动删除。
+
+**验证**
+- `npm run build` 通过。
+- `firebase deploy --only functions:createRoom --project zhinzen --force` 成功。
+- `health` HTTP 调用返回 200。
+- 使用 Firebase Web SDK 调用 `createRoom` 成功。
+- 使用 Firebase Web SDK 调用 `joinRoom` 成功。
+- 已删除验证产生的临时 Firestore 房间 `Q778RPF5G3` 及其子集合。
+
+**注意**
+- Firebase CLI 提示 Node.js 20 runtime 已在 2026-04-30 弃用，并将在 2026-10-30 停止部署；
+  后续应单独升级 Functions runtime（优先评估 Node.js 22）和 `firebase-functions` 版本。
+
+**下一步**
+1. 手动在前端创建房间，确认 Firestore 中出现 `rooms/{roomId}`。
+2. 接入 Geolocation 与 RTDB 实时位置上传。
+
+---
+
 ## 2026-06-03 — Phase 2 Task 2：Cloud Functions 房间接口 ✅
 
 **做了什么**

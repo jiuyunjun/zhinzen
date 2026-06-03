@@ -18,14 +18,21 @@ export function RoomChoice({ onEnterRoom }: { onEnterRoom: () => void }) {
   const displayName = useDeviceStore((s) => s.displayName);
   const createRoom = useRoomStore((s) => s.createRoom);
   const joinRoom = useRoomStore((s) => s.joinRoom);
-  const [code, setCode] = useState('');
+  const pendingJoinCode = useRoomStore((s) => s.pendingJoinCode);
+  const busy = useRoomStore((s) => s.busy);
+  const error = useRoomStore((s) => s.error);
+  const clearError = useRoomStore((s) => s.clearError);
+  const [code, setCode] = useState(pendingJoinCode ?? '');
 
-  const onCreate = () => {
-    createRoom();
-    onEnterRoom();
+  const onCreate = async () => {
+    if (busy) return;
+    const roomId = await createRoom();
+    if (roomId) onEnterRoom();
   };
-  const onJoin = () => {
-    if (joinRoom(code)) onEnterRoom();
+  const onJoin = async () => {
+    if (busy) return;
+    const roomId = await joinRoom(code);
+    if (roomId) onEnterRoom();
   };
 
   return (
@@ -67,6 +74,8 @@ export function RoomChoice({ onEnterRoom }: { onEnterRoom: () => void }) {
             sub={t('createRoomSub')}
             color={tokens.self}
             onClick={onCreate}
+            disabled={busy}
+            loadingLabel={busy ? t('creatingRoom') : null}
           />
           <ChoiceCard
             icon="people"
@@ -74,15 +83,21 @@ export function RoomChoice({ onEnterRoom }: { onEnterRoom: () => void }) {
             sub={t('joinRoomSub')}
             color={tokens.target}
             onClick={onJoin}
+            disabled={busy || !code.trim()}
+            loadingLabel={busy ? t('joiningRoom') : null}
           />
           <div style={{ display: 'flex', gap: 10, marginTop: 2 }}>
             <input
               value={code}
-              onChange={(e) => setCode(e.target.value)}
+              onChange={(e) => {
+                setCode(e.target.value);
+                if (error) clearError();
+              }}
               placeholder={t('joinPh')}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') onJoin();
               }}
+              disabled={busy}
               autoComplete="off"
               style={{
                 flex: 1,
@@ -100,13 +115,28 @@ export function RoomChoice({ onEnterRoom }: { onEnterRoom: () => void }) {
             />
             <PrimaryButton
               onClick={onJoin}
-              disabled={!code.trim()}
+              disabled={busy || !code.trim()}
               color={tokens.target}
               style={{ width: 84, height: 50 }}
             >
-              {t('join')}
+              {busy ? '...' : t('join')}
             </PrimaryButton>
           </div>
+          {error && (
+            <div
+              role="status"
+              style={{
+                padding: '12px 14px',
+                borderRadius: 14,
+                background: withAlpha(tokens.danger, 0.08),
+                color: tokens.danger,
+                fontSize: 13.5,
+                lineHeight: 1.45,
+              }}
+            >
+              {roomErrorText(error, t)}
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -119,17 +149,22 @@ function ChoiceCard({
   sub,
   color,
   onClick,
+  disabled = false,
+  loadingLabel,
 }: {
   icon: IconName;
   title: ReactNode;
   sub: ReactNode;
   color: string;
   onClick: () => void;
+  disabled?: boolean;
+  loadingLabel?: ReactNode;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
+      disabled={disabled}
       style={{
         width: '100%',
         textAlign: 'left',
@@ -140,8 +175,9 @@ function ChoiceCard({
         background: '#fff',
         border: `1.5px solid ${tokens.line}`,
         borderRadius: 20,
-        cursor: 'pointer',
+        cursor: disabled ? 'default' : 'pointer',
         fontFamily: 'inherit',
+        opacity: disabled ? 0.72 : 1,
       }}
     >
       <div
@@ -160,10 +196,35 @@ function ChoiceCard({
         <Icon name={icon} size={24} />
       </div>
       <div style={{ flex: 1 }}>
-        <div style={{ fontWeight: 650, fontSize: 17, color: tokens.ink }}>{title}</div>
+        <div style={{ fontWeight: 650, fontSize: 17, color: tokens.ink }}>
+          {loadingLabel ?? title}
+        </div>
         <div style={{ fontSize: 13, color: tokens.inkFaint, marginTop: 2 }}>{sub}</div>
       </div>
       <Icon name="chevron" size={18} color={tokens.inkFaint} />
     </button>
   );
+}
+
+function roomErrorText(
+  code: NonNullable<ReturnType<typeof useRoomStore.getState>['error']>,
+  t: ReturnType<typeof useUiStore.getState>['t'],
+): string {
+  switch (code) {
+    case 'not-found':
+      return t('roomErrorNotFound');
+    case 'failed-precondition':
+      return t('roomErrorExpired');
+    case 'resource-exhausted':
+      return t('roomErrorFull');
+    case 'permission-denied':
+      return t('roomErrorSession');
+    case 'invalid-argument':
+      return t('roomErrorInvalid');
+    case 'unavailable':
+      return t('roomErrorNetwork');
+    case 'unknown':
+    default:
+      return t('roomErrorUnknown');
+  }
 }

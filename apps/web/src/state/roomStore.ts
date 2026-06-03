@@ -1,5 +1,13 @@
 import { create } from 'zustand';
-import { generateRoomId, parseRoomInput, roomFromUrl } from '../lib/roomCode';
+import { parseRoomInput, roomFromUrl } from '../lib/roomCode';
+import { useDeviceStore } from './deviceStore';
+import {
+  buildRoomPayload,
+  createRoomOnBackend,
+  joinRoomOnBackend,
+  toRoomApiError,
+  type RoomApiErrorCode,
+} from '../lib/roomApi';
 
 /**
  * roomState (design.md §14) — which room this device is in and whether it is
@@ -11,13 +19,17 @@ import { generateRoomId, parseRoomInput, roomFromUrl } from '../lib/roomCode';
  */
 interface RoomState {
   roomId: string | null;
+  pendingJoinCode: string | null;
   /** Whether this device is currently sharing its location. */
   sharing: boolean;
-  createRoom: () => string;
+  busy: boolean;
+  error: RoomApiErrorCode | null;
+  createRoom: () => Promise<string | null>;
   /** Join from a pasted invite link or raw code; returns the normalized id or null. */
-  joinRoom: (input: string) => string | null;
+  joinRoom: (input: string) => Promise<string | null>;
   leaveRoom: () => void;
   setSharing: (on: boolean) => void;
+  clearError: () => void;
 }
 
 function syncUrl(roomId: string | null): void {
@@ -28,25 +40,61 @@ function syncUrl(roomId: string | null): void {
 }
 
 export const useRoomStore = create<RoomState>((set) => ({
-  // Pick up an invite link the app was opened with.
-  roomId: roomFromUrl(),
+  roomId: null,
+  // Pick up an invite link without joining until the backend validates it.
+  pendingJoinCode: roomFromUrl(),
   sharing: true,
-  createRoom: () => {
-    const roomId = generateRoomId();
-    syncUrl(roomId);
-    set({ roomId, sharing: true });
-    return roomId;
+  busy: false,
+  error: null,
+  createRoom: async () => {
+    const device = useDeviceStore.getState();
+    set({ busy: true, error: null });
+    try {
+      const room = await createRoomOnBackend(
+        buildRoomPayload({
+          deviceId: device.deviceId,
+          deviceSecret: device.deviceSecret,
+          displayName: device.displayName,
+          sharingLocation: true,
+        }),
+      );
+      syncUrl(room.roomId);
+      set({ roomId: room.roomId, pendingJoinCode: null, sharing: true, busy: false });
+      return room.roomId;
+    } catch (error) {
+      const roomError = toRoomApiError(error);
+      set({ busy: false, error: roomError.code });
+      return null;
+    }
   },
-  joinRoom: (input) => {
+  joinRoom: async (input) => {
     const roomId = parseRoomInput(input);
     if (!roomId) return null;
-    syncUrl(roomId);
-    set({ roomId, sharing: true });
-    return roomId;
+    const device = useDeviceStore.getState();
+    set({ busy: true, error: null });
+    try {
+      const room = await joinRoomOnBackend({
+        ...buildRoomPayload({
+          deviceId: device.deviceId,
+          deviceSecret: device.deviceSecret,
+          displayName: device.displayName,
+          sharingLocation: true,
+        }),
+        roomId,
+      });
+      syncUrl(room.roomId);
+      set({ roomId: room.roomId, pendingJoinCode: null, sharing: true, busy: false });
+      return room.roomId;
+    } catch (error) {
+      const roomError = toRoomApiError(error);
+      set({ busy: false, error: roomError.code });
+      return null;
+    }
   },
   leaveRoom: () => {
     syncUrl(null);
-    set({ roomId: null });
+    set({ roomId: null, pendingJoinCode: null, error: null });
   },
   setSharing: (on) => set({ sharing: on }),
+  clearError: () => set({ error: null }),
 }));

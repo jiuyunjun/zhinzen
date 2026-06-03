@@ -27,7 +27,7 @@ export function App() {
     return (
       <Onboarding
         // If opened via an invite link, jump straight to the room after naming.
-        onContinue={() => setPhase(useRoomStore.getState().roomId ? 'map' : 'room')}
+        onContinue={() => setPhase('room')}
       />
     );
   }
