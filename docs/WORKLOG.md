@@ -5,6 +5,34 @@
 
 ---
 
+## 2026-06-03 — Phase 2 RTDB 创建完成 ✅
+
+**做了什么**
+- 用户已将 Firebase 项目升级到 Blaze 后，用 Firebase Realtime Database Management API
+  创建 RTDB 实例：`zhinzen-live`。
+- 实例区域：`asia-southeast1`。
+- 实例状态：`ACTIVE`。
+- 已把实例 URL 写入本地 `.env.local` 的 `VITE_FIREBASE_DATABASE_URL`（该文件被忽略，不提交）。
+
+**当前环境状态**
+- `.env.local` 中 8 个 `VITE_*` 配置均已设置：
+  - `VITE_MAPS_API_KEY`
+  - `VITE_FIREBASE_API_KEY`
+  - `VITE_FIREBASE_AUTH_DOMAIN`
+  - `VITE_FIREBASE_PROJECT_ID`
+  - `VITE_FIREBASE_STORAGE_BUCKET`
+  - `VITE_FIREBASE_MESSAGING_SENDER_ID`
+  - `VITE_FIREBASE_APP_ID`
+  - `VITE_FIREBASE_DATABASE_URL`
+
+**下一步**
+1. 安装 Firebase Web SDK，新增 `apps/web/src/lib/firebase.ts`。
+2. 实现 Cloud Functions `createRoom` / `joinRoom`。
+3. 将 `roomStore` 从本地 mock 切到真实后端。
+4. 接入 Geolocation 上传到 RTDB `liveLocations/{roomId}/{deviceId}`。
+
+---
+
 ## 2026-06-03 — Phase 2 环境接手 / Firebase CLI 配置 ✅
 
 **做了什么**
