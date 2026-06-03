@@ -5,6 +5,45 @@
 
 ---
 
+## 2026-06-03 — Phase 2 环境接手 / Firebase CLI 配置 ✅
+
+**做了什么**
+- 用 Firebase CLI / gcloud 接手 `zhinzen` 项目配置，确认项目可访问。
+- 创建 Firebase Web App：`zhinzen-web`。
+- 启用 Firebase / Firestore / Realtime Database 相关 API。
+- 创建 Cloud Firestore 默认数据库：`(default)`，区域 `asia-northeast1`，Native mode。
+- 新增 `.firebaserc`，默认项目指向 `zhinzen`。
+- 用 CLI 拉取 Web SDK config 并写入本地 `.env.local`（该文件被 `.gitignore` 忽略，不提交）。
+- 将 gcloud 默认项目与 ADC quota project 切到 `zhinzen`，便于后续 CLI / SDK 操作。
+
+**当前环境状态**
+- `.env.local` 中已设置：
+  - `VITE_MAPS_API_KEY`
+  - `VITE_FIREBASE_API_KEY`
+  - `VITE_FIREBASE_AUTH_DOMAIN`
+  - `VITE_FIREBASE_PROJECT_ID`
+  - `VITE_FIREBASE_STORAGE_BUCKET`
+  - `VITE_FIREBASE_MESSAGING_SENDER_ID`
+  - `VITE_FIREBASE_APP_ID`
+- `VITE_FIREBASE_DATABASE_URL` 仍为空。
+
+**阻塞 / 注意**
+- Realtime Database 尚未创建。`firebase database:instances:create` 要求先有默认实例；
+  使用官方 REST 管理 API 创建 `zhinzen-default-rtdb` 时返回：
+  `Blaze plan required for multiple database instances`。
+- 目前需要用户在 Firebase Console 的 Realtime Database 页面创建默认实例，或把项目升级到
+  Blaze 后再用管理 API 创建实例。建议位置选亚洲可用区域（如 `asia-southeast1`）。
+- Maps JS API key 仍需在 GCP Console 限制 HTTP referrer 与 API 范围；此前未确认限制状态。
+
+**下一步**
+1. 创建 Realtime Database 默认实例，并把 URL 填入 `.env.local` 的
+   `VITE_FIREBASE_DATABASE_URL`。
+2. 安装 Firebase Web SDK，新增 `apps/web/src/lib/firebase.ts`。
+3. 先用 Firestore + emulator/真实项目实现 Cloud Functions `createRoom` / `joinRoom`。
+4. RTDB 就绪后再接 `liveLocations/{roomId}/{deviceId}` 上传和监听。
+
+---
+
 ## 2026-06-03 — Phase 2 准备 / 交接（环境配置）⏳ 进行中
 
 **已完成（commit `a160393`）**
