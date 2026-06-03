@@ -2,6 +2,7 @@ import type { LiveLocation } from '@zhinzen/shared-types';
 import { create } from 'zustand';
 
 import { writeLiveLocation } from '../lib/locationApi';
+import { appendTrackPoint } from '../lib/trackApi';
 
 type LocationPermissionState = 'unknown' | 'prompt' | 'granted' | 'denied';
 type LocationStatus = 'idle' | 'requesting' | 'watching' | 'error';
@@ -9,6 +10,7 @@ type LocationStatus = 'idle' | 'requesting' | 'watching' | 'error';
 interface StartSharingInput {
   roomId: string;
   deviceId: string;
+  deviceSecret: string;
   displayName: string;
 }
 
@@ -22,10 +24,12 @@ interface LocationState {
 }
 
 const MIN_UPLOAD_INTERVAL_MS = 3000;
+const MIN_TRACK_INTERVAL_MS = 12000;
 
 let watchId: number | null = null;
 let activeInput: StartSharingInput | null = null;
 let lastUploadAt = 0;
+let lastTrackAt = 0;
 
 function positionToLiveLocation(
   position: GeolocationPosition,
@@ -80,6 +84,7 @@ export const useLocationStore = create<LocationState>((set, get) => ({
 
     activeInput = input;
     lastUploadAt = 0;
+    lastTrackAt = 0;
     set({ status: 'requesting', permission: await readPermission(), error: null });
 
     return new Promise<boolean>((resolve) => {
@@ -98,6 +103,23 @@ export const useLocationStore = create<LocationState>((set, get) => ({
             lastUploadAt = now;
             void writeLiveLocation(active.roomId, liveLocation).catch(() => {
               set({ status: 'error', error: null });
+            });
+          }
+
+          if (now - lastTrackAt >= MIN_TRACK_INTERVAL_MS) {
+            lastTrackAt = now;
+            void appendTrackPoint({
+              roomId: active.roomId,
+              deviceId: active.deviceId,
+              deviceSecret: active.deviceSecret,
+              lat: liveLocation.lat,
+              lng: liveLocation.lng,
+              accuracy: liveLocation.accuracy,
+              heading: liveLocation.heading,
+              speed: liveLocation.speed,
+              createdAt: liveLocation.updatedAt,
+            }).catch(() => {
+              // Track persistence is secondary; live sharing should continue.
             });
           }
 

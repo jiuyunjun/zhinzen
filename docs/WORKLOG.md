@@ -5,6 +5,38 @@
 
 ---
 
+## 2026-06-03 — Phase 3 Task 3：前端轨迹点写入 ✅
+
+**做了什么**
+- 新增 `apps/web/src/lib/trackApi.ts`，封装 callable function：
+  - `appendTrackPoint`
+- `locationStore` 在位置共享开启时继续每 3 秒写 RTDB 实时位置：
+  - `liveLocations/{roomId}/{deviceId}`
+- 同一条定位 watcher 现在每 12 秒通过 Cloud Functions 写一次自己的 Firestore 轨迹点。
+- 轨迹写入携带：
+  - `roomId`
+  - `deviceId`
+  - `deviceSecret`
+  - 经纬度、精度、方向、速度、时间
+- `MapScreen` 从 `deviceStore` 读取 `deviceSecret` 并传入位置共享流程。
+
+**关键决策**
+- 实时位置和轨迹写入分开节流：
+  - 实时位置：3 秒。
+  - 轨迹点：12 秒。
+- 轨迹写入失败不会停止实时位置共享，避免短暂 Functions/Firestore 问题影响地图当前位置。
+
+**验证**
+- `npm run build` 通过。
+- Vite 仍提示主 bundle 超过 500KB，后续应单独做 Firebase 代码拆分。
+
+**下一步**
+1. 前端读取选中成员最近 24 小时轨迹。
+2. 在 Google Map 上显示轨迹线。
+3. 按速度对轨迹线段做红到绿的线性颜色表达。
+
+---
+
 ## 2026-06-03 — Phase 3 Task 2：轨迹写入后端接口 ✅
 
 **做了什么**

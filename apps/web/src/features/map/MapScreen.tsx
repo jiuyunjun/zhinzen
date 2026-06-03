@@ -32,6 +32,7 @@ export function MapScreen({ onLeave }: { onLeave: () => void }) {
   const stopWatchingMembers = useMembersStore((s) => s.stopWatching);
   const displayName = useDeviceStore((s) => s.displayName);
   const deviceId = useDeviceStore((s) => s.deviceId);
+  const deviceSecret = useDeviceStore((s) => s.deviceSecret);
   const [recenterSignal, setRecenterSignal] = useState(0);
   const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
   const { msg, flash } = useToast();
@@ -56,7 +57,7 @@ export function MapScreen({ onLeave }: { onLeave: () => void }) {
     let cancelled = false;
 
     if (sharing) {
-      void startLocationSharing({ roomId, deviceId, displayName }).then((started) => {
+      void startLocationSharing({ roomId, deviceId, deviceSecret, displayName }).then((started) => {
         if (!cancelled && started) flash(t('locationStarted'));
         if (!cancelled && !started) setSharing(false);
       });
@@ -70,6 +71,7 @@ export function MapScreen({ onLeave }: { onLeave: () => void }) {
     };
   }, [
     deviceId,
+    deviceSecret,
     displayName,
     flash,
     roomId,
