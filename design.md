@@ -97,6 +97,9 @@ https://example.com/r/{roomId}
 4. 房间内可以显示最近离线设备。
 5. 房间内设备可以随时停止共享。
 6. 房间内设备可以随时离开。
+7. MVP 默认房间有效期为 24 小时。
+8. RTDB 中该房间的实时位置数据从房间创建起最多保留 24 小时。
+9. 房间过期后，后端清理 `liveLocations/{roomId}` 并停止接受新的实时位置写入。
 
 ---
 
@@ -415,14 +418,30 @@ UWB 可用
 3. 同一时间只重点显示一个目标轨迹。
 4. 轨迹点过多时需要抽稀。
 5. 轨迹需要有保存期限。
+6. 轨迹线需要表达速度变化。
+7. 停留或极慢移动的线段使用红色系。
+8. 快速移动的线段使用绿色系。
+9. 中间速度使用线性颜色渐变，避免只用离散颜色。
 
 轨迹保存策略：
 
 ```text
-MVP：保存最近 30 分钟到 2 小时
+MVP：保存最近 24 小时
 后续：允许房主选择保存时间
 默认：房间过期后删除轨迹
 ```
+
+轨迹线颜色规则：
+
+```text
+停留 / 极慢：红色
+慢速移动：橙色
+正常移动：黄色到浅绿
+快速移动：绿色
+```
+
+颜色计算以相邻轨迹点的速度或位移 / 时间差为基础。Web 端应优先使用上报的 `speed`，
+如果 `speed` 不可用或不可信，再用相邻点距离和时间差估算速度。轨迹线段颜色按速度做线性插值。
 
 ---
 
@@ -674,7 +693,7 @@ liveLocations/{roomId}/{deviceId}
 
 #### tracks
 
-轨迹可放在 Firestore。
+轨迹 MVP 放在 Firestore。
 
 路径：
 
@@ -691,7 +710,8 @@ rooms/{roomId}/tracks/{deviceId}/points/{pointId}
   "accuracy": 10,
   "heading": 90,
   "speed": 1.2,
-  "createdAt": "timestamp"
+  "createdAt": "timestamp",
+  "segmentKind": "stopped | slow | moving | fast"
 }
 ```
 
@@ -700,6 +720,27 @@ rooms/{roomId}/tracks/{deviceId}/points/{pointId}
 ```text
 时间戳 + 随机后缀
 ```
+
+轨迹读取策略：
+
+1. 实时地图位置仍然只监听 RTDB `liveLocations/{roomId}/{deviceId}`。
+2. 轨迹不全房间实时监听。
+3. 点击某个成员后，再按需读取该成员轨迹：
+
+```text
+rooms/{roomId}/tracks/{targetDeviceId}/points
+where createdAt >= now - 24h
+orderBy createdAt asc
+```
+
+轨迹写入策略：
+
+1. 前端不直接写 Firestore 轨迹集合。
+2. 前端通过 Cloud Functions 写入自己的轨迹点。
+3. Cloud Functions 校验 `roomId + deviceId + deviceSecret`。
+4. 设备只能写自己的 `rooms/{roomId}/tracks/{deviceId}/points/{pointId}`。
+5. 默认轨迹保留 24 小时。
+6. 超过 24 小时的轨迹点通过 Firestore TTL 或定时清理函数删除。
 
 ---
 

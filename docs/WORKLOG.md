@@ -5,6 +5,39 @@
 
 ---
 
+## 2026-06-03 — 轨迹与实时数据生命周期决策 ✅
+
+**做了什么**
+- 更新 `design.md`，明确轨迹和实时位置分层：
+  - RTDB `liveLocations/{roomId}/{deviceId}` 只保存当前实时位置。
+  - Firestore `rooms/{roomId}/tracks/{deviceId}/points/{pointId}` 保存轨迹点。
+- 明确轨迹读取方式：
+  - 不全房间实时监听轨迹。
+  - 点击特定成员后，按需读取该成员最近 24 小时轨迹。
+- 明确轨迹写入方式：
+  - 前端不直接写 Firestore tracks。
+  - 通过 Cloud Functions 校验 `roomId + deviceId + deviceSecret` 后写入自己的轨迹点。
+- 明确轨迹线视觉：
+  - 停留 / 极慢使用红色系。
+  - 快速移动使用绿色系。
+  - 中间速度按线性颜色渐变。
+- 明确 RTDB 生命周期：
+  - MVP 房间有效期 24 小时。
+  - `liveLocations/{roomId}` 从房间创建起最多保留 24 小时。
+  - 房间过期后由后端清理对应 RTDB 实时位置数据。
+
+**关键决策**
+- RTDB 负责低延迟当前位置。
+- Firestore 负责按需查询的 24 小时轨迹历史。
+- RTDB 没有内建 TTL，本项目需要通过 Cloud Functions 定时清理过期房间实时数据。
+
+**下一步**
+1. 实现 `appendTrackPoint` Cloud Function。
+2. 前端位置上传时按较低频率同步写轨迹点。
+3. 点击成员后读取并显示该成员最近 24 小时轨迹。
+
+---
+
 ## 2026-06-03 — Phase 3 Task 1：成员详情、距离与导航 ✅
 
 **做了什么**
