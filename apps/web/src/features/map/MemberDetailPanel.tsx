@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import {
   calculateBearing,
   calculateDistance,
@@ -335,6 +335,9 @@ function DirectionPointer({
   compassStatus: 'idle' | 'requesting' | 'watching' | 'unavailable';
 }) {
   const t = useUiStore((s) => s.t);
+  // Unwrap to a continuous angle so the needle takes the short path across 0°/360°
+  // instead of spinning ~360° when the relative direction wraps.
+  const displayRotation = useContinuousAngle(rotation);
   const detail =
     available && bearing !== null
       ? `${Math.round(bearing)}°`
@@ -370,7 +373,7 @@ function DirectionPointer({
       >
         <div
           style={{
-            transform: `rotate(${rotation}deg)`,
+            transform: `rotate(${displayRotation}deg)`,
             transition: 'transform 180ms ease',
             display: 'flex',
           }}
@@ -415,6 +418,23 @@ function Metric({ label, value }: { label: string; value: string }) {
       </div>
     </div>
   );
+}
+
+/** Shortest signed angular distance from `current` to `target`, in (-180, 180]. */
+function shortestAngleDelta(target: number, current: number): number {
+  return ((target - current + 540) % 360) - 180;
+}
+
+/**
+ * Turn a wrapping 0–360 angle into a continuous one that only ever changes by the
+ * shortest step, so CSS rotation transitions never spin the long way across north.
+ */
+function useContinuousAngle(raw: number): number {
+  const ref = useRef({ prevRaw: raw, continuous: raw });
+  const acc = ref.current;
+  acc.continuous += shortestAngleDelta(raw, acc.prevRaw);
+  acc.prevRaw = raw;
+  return acc.continuous;
 }
 
 function formatRelativeTime(updatedAt: number): string {
