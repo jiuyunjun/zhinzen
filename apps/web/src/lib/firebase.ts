@@ -43,7 +43,8 @@ export function getFirebaseServices(): FirebaseServices {
   const app = getApps()[0] ?? initializeApp(firebaseConfig);
   const firestore = getFirestore(app);
   const database = getDatabase(app);
-  const functions = getFunctions(app);
+  // Must match the functions' deployed region (firebase/functions setGlobalOptions).
+  const functions = getFunctions(app, 'asia-northeast1');
 
   if (useFirebaseEmulators && !emulatorsConnected) {
     connectFirestoreEmulator(firestore, '127.0.0.1', 8080);

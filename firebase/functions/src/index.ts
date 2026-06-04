@@ -1,8 +1,15 @@
 import { randomBytes, createHash } from 'node:crypto';
 
+import { setGlobalOptions } from 'firebase-functions/v2';
 import { initializeApp } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
 import { HttpsError, onCall, onRequest } from 'firebase-functions/v2/https';
+
+// Run in the same region as Firestore (asia-northeast1) so room transactions are
+// local, and close to the (currently Asia-based) users — avoids the US↔Tokyo and
+// user↔US round-trips that made create/join slow. Keep the client's
+// getFunctions(app, 'asia-northeast1') in sync (apps/web/src/lib/firebase.ts).
+setGlobalOptions({ region: 'asia-northeast1' });
 
 initializeApp();
 
