@@ -1,12 +1,12 @@
-package com.zhinzen.app
+package com.lazydoglab.zhinzen
 
 import android.app.Application
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
-import com.zhinzen.app.data.RoomCode
-import com.zhinzen.app.device.DeviceIdentityStore
+import com.lazydoglab.zhinzen.data.RoomCode
+import com.lazydoglab.zhinzen.device.DeviceIdentityStore
 
 enum class Phase { Onboarding, Room, Map }
 

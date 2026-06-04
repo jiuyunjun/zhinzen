@@ -1,4 +1,4 @@
-package com.zhinzen.app.ui.screens
+package com.lazydoglab.zhinzen.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -27,8 +27,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.zhinzen.app.R
-import com.zhinzen.app.ui.theme.ZzColor
+import com.lazydoglab.zhinzen.R
+import com.lazydoglab.zhinzen.ui.theme.ZzColor
 
 @Composable
 fun RoomChoiceScreen(

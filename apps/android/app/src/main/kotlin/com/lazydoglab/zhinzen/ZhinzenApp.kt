@@ -1,15 +1,15 @@
-package com.zhinzen.app
+package com.lazydoglab.zhinzen
 
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.zhinzen.app.ui.screens.MapScreen
-import com.zhinzen.app.ui.screens.OnboardingScreen
-import com.zhinzen.app.ui.screens.RoomChoiceScreen
-import com.zhinzen.app.ui.theme.ZhinzenTheme
-import com.zhinzen.app.ui.theme.ZzColor
+import com.lazydoglab.zhinzen.ui.screens.MapScreen
+import com.lazydoglab.zhinzen.ui.screens.OnboardingScreen
+import com.lazydoglab.zhinzen.ui.screens.RoomChoiceScreen
+import com.lazydoglab.zhinzen.ui.theme.ZhinzenTheme
+import com.lazydoglab.zhinzen.ui.theme.ZzColor
 
 /** Root composable: phase router over onboarding → room → map (mirrors the web). */
 @Composable

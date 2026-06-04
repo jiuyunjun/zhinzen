@@ -1,4 +1,4 @@
-package com.zhinzen.app
+package com.lazydoglab.zhinzen
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity

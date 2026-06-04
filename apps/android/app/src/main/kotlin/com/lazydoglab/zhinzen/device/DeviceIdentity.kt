@@ -1,4 +1,4 @@
-package com.zhinzen.app.device
+package com.lazydoglab.zhinzen.device
 
 import android.content.Context
 import java.security.SecureRandom

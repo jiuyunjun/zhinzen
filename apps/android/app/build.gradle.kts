@@ -5,14 +5,14 @@ plugins {
 }
 
 android {
-    namespace = "com.zhinzen.app"
+    namespace = "com.lazydoglab.zhinzen"
     compileSdk = 35
     // Pin to a build-tools version installed on this machine (AGP's default 35.0.0
     // isn't present); 34.0.0 is >= AGP 8.7's minimum.
     buildToolsVersion = "34.0.0"
 
     defaultConfig {
-        applicationId = "com.zhinzen.app"
+        applicationId = "com.lazydoglab.zhinzen"
         minSdk = 26
         targetSdk = 35
         versionCode = 1

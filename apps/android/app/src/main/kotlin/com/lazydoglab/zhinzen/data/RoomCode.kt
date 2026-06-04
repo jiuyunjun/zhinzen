@@ -1,4 +1,4 @@
-package com.zhinzen.app.data
+package com.lazydoglab.zhinzen.data
 
 import java.security.SecureRandom
 
@@ -31,5 +31,5 @@ object RoomCode {
         return normalized.ifEmpty { null }
     }
 
-    fun inviteLink(roomId: String): String = "https://zhinzen.web.app/#/r/$roomId"
+    fun inviteLink(roomId: String): String = "https://zhinzen.lazydoglab.com/#/r/$roomId"
 }

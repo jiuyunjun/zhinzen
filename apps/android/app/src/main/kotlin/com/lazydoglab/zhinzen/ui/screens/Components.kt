@@ -1,4 +1,4 @@
-package com.zhinzen.app.ui.screens
+package com.lazydoglab.zhinzen.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -12,7 +12,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.zhinzen.app.ui.theme.ZzColor
+import com.lazydoglab.zhinzen.ui.theme.ZzColor
 
 /** Brand wordmark: a self-colored pin glyph + "zhinzen" (mirrors the web). */
 @Composable

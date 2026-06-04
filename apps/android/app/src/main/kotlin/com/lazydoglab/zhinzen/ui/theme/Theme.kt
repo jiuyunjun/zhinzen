@@ -1,4 +1,4 @@
-package com.zhinzen.app.ui.theme
+package com.lazydoglab.zhinzen.ui.theme
 
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.lightColorScheme
