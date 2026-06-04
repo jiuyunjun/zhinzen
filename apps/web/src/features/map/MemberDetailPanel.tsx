@@ -248,7 +248,10 @@ function OtherPanel({
   const location = member.location;
   const deviceHeading = useSensorStore((s) => s.heading);
   const compassStatus = useSensorStore((s) => s.compassStatus);
-  const canNavigate = Boolean(location && member.status === 'online');
+  // Navigate to the last known location whenever we have one — even if it's
+  // stale/offline — and warn that the person may have moved.
+  const canNavigate = Boolean(location);
+  const showMovedHint = Boolean(location) && member.status !== 'online';
   const distance =
     ownLocation && location ? formatDistance(calculateDistance(ownLocation, location)) : null;
   const targetBearing = ownLocation && location ? calculateBearing(ownLocation, location) : null;
@@ -281,7 +284,7 @@ function OtherPanel({
         />
       </div>
 
-      {location && member.status === 'stale' && (
+      {showMovedHint && (
         <div style={{ marginTop: 10, color: tokens.stale, fontSize: 12.5, lineHeight: 1.35 }}>
           {t('staleNavigationHint')}
         </div>
