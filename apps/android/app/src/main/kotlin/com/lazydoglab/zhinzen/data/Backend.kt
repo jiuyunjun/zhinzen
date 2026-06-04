@@ -1,0 +1,55 @@
+package com.lazydoglab.zhinzen.data
+
+import com.google.firebase.database.FirebaseDatabase
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.functions.FirebaseFunctions
+import com.lazydoglab.zhinzen.device.DeviceIdentity
+import kotlinx.coroutines.tasks.await
+
+/**
+ * Firebase backend access, reusing the same project/functions as the web client.
+ * Functions live in asia-northeast1; live locations in the named RTDB instance.
+ */
+object Backend {
+    private const val RTDB_URL = "https://zhinzen-live.asia-southeast1.firebasedatabase.app"
+    private const val REGION = "asia-northeast1"
+
+    val firestore: FirebaseFirestore by lazy { FirebaseFirestore.getInstance() }
+    val database: FirebaseDatabase by lazy { FirebaseDatabase.getInstance(RTDB_URL) }
+    val functions: FirebaseFunctions by lazy { FirebaseFunctions.getInstance(REGION) }
+
+    private fun payload(identity: DeviceIdentity, sharing: Boolean): HashMap<String, Any?> =
+        hashMapOf(
+            "deviceId" to identity.deviceId,
+            "deviceSecret" to identity.deviceSecret,
+            "displayName" to identity.displayName,
+            "platform" to "android",
+            "sharingLocation" to sharing,
+            "capabilities" to
+                hashMapOf(
+                    "location" to true,
+                    "imu" to true,
+                    "compass" to true,
+                    "uwb" to false,
+                    "ble" to false,
+                ),
+        )
+
+    /** Create a room via the createRoom callable; returns the new roomId. */
+    suspend fun createRoom(identity: DeviceIdentity, sharing: Boolean): String {
+        val result = functions.getHttpsCallable("createRoom").call(payload(identity, sharing)).await()
+        return roomIdFrom(result.getData())
+    }
+
+    /** Join an existing room via the joinRoom callable; returns the roomId. */
+    suspend fun joinRoom(identity: DeviceIdentity, roomId: String, sharing: Boolean): String {
+        val data = payload(identity, sharing).apply { put("roomId", roomId) }
+        val result = functions.getHttpsCallable("joinRoom").call(data).await()
+        return roomIdFrom(result.getData())
+    }
+
+    private fun roomIdFrom(data: Any?): String {
+        val map = data as? Map<*, *> ?: error("Unexpected room response")
+        return map["roomId"] as? String ?: error("Missing roomId in response")
+    }
+}

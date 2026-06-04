@@ -21,4 +21,6 @@
     <string name="map_coming_soon">地图将在下一步接入 Google 地图</string>
     <string name="edit_name">改名字</string>
     <string name="save">保存</string>
+    <string name="location_permission_rationale">需要定位权限来共享你的位置并在地图上显示</string>
+    <string name="grant_location">允许定位</string>
 </resources>

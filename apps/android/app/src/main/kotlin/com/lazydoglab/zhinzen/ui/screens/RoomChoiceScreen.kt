@@ -33,8 +33,11 @@ import com.lazydoglab.zhinzen.ui.theme.ZzColor
 @Composable
 fun RoomChoiceScreen(
     displayName: String,
+    busy: Boolean,
+    error: String?,
     onCreate: () -> Unit,
     onJoin: (String) -> Unit,
+    onClearError: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var code by remember { mutableStateOf("") }
@@ -62,12 +65,14 @@ fun RoomChoiceScreen(
         ActionCard(
             title = stringResource(R.string.create_room),
             subtitle = stringResource(R.string.create_room_sub),
+            enabled = !busy,
             onClick = onCreate,
             modifier = Modifier.padding(top = 24.dp),
         )
         ActionCard(
             title = stringResource(R.string.join_room),
             subtitle = stringResource(R.string.join_room_sub),
+            enabled = !busy,
             onClick = { if (code.isNotBlank()) onJoin(code) },
             modifier = Modifier.padding(top = 12.dp),
         )
@@ -80,20 +85,33 @@ fun RoomChoiceScreen(
         ) {
             OutlinedTextField(
                 value = code,
-                onValueChange = { code = it },
+                onValueChange = {
+                    code = it
+                    if (error != null) onClearError()
+                },
                 singleLine = true,
+                enabled = !busy,
                 placeholder = { Text(stringResource(R.string.join_placeholder)) },
                 modifier = Modifier.weight(1f),
             )
             Button(
                 onClick = { if (code.isNotBlank()) onJoin(code) },
-                enabled = code.isNotBlank(),
+                enabled = !busy && code.isNotBlank(),
                 modifier = Modifier
                     .padding(start = 10.dp)
                     .width(96.dp),
             ) {
-                Text(stringResource(R.string.join))
+                Text(if (busy) "…" else stringResource(R.string.join))
             }
+        }
+
+        if (error != null) {
+            Text(
+                text = error,
+                color = ZzColor.Danger,
+                fontSize = 13.sp,
+                modifier = Modifier.padding(top = 14.dp),
+            )
         }
     }
 }
@@ -102,6 +120,7 @@ fun RoomChoiceScreen(
 private fun ActionCard(
     title: String,
     subtitle: String,
+    enabled: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -112,7 +131,7 @@ private fun ActionCard(
             .clip(shape)
             .background(ZzColor.Surface)
             .border(1.5.dp, ZzColor.Line, shape)
-            .clickable(onClick = onClick)
+            .clickable(enabled = enabled, onClick = onClick)
             .padding(18.dp),
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {

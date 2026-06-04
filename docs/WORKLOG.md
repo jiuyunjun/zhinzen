@@ -5,6 +5,47 @@
 
 ---
 
+## 2026-06-04 — Phase 5 增量：Android 接 Firebase + 地图 + 实时定位 ✅（已编译）
+
+**做了什么**
+把安卓骨架接上真实后端，复用 web 同一套 Cloud Functions / Firestore / RTDB，做到
+**两端能加入同一个房间、互相看到实时位置**（相当于 web 的 Phase 2）。
+
+**Gradle / 配置**
+- `google-services` 插件 + Firebase BoM 33.7.0（firestore/database/functions）、
+  `maps-compose` 6.2.1、`play-services-location`、`kotlinx-coroutines-play-services`、
+  `accompanist-permissions`。
+- Android Maps key 从 `local.properties` 的 `MAPS_API_KEY` 注入 manifest 占位符
+  `${MAPS_API_KEY}`（meta-data `com.google.android.geo.API_KEY`）。
+- `google-services.json` 放 `apps/android/app/`（已 gitignore；包名 `com.lazydoglab.zhinzen`）。
+
+**代码（com.lazydoglab.zhinzen）**
+- `data/Models.kt`：RoomMember / LiveLocation / DeviceCapabilities / MemberView +
+  `deriveStatus`（全部带默认值，便于 Firestore/RTDB 反序列化）。
+- `data/Backend.kt`：Firestore / RTDB(命名实例 zhinzen-live) / Functions(asia-northeast1)，
+  `createRoom`/`joinRoom` 调用现有 callable（coroutines `.await()`）。
+- `location/LocationController.kt`：Fused Location → `Flow<Location>`（callbackFlow）。
+- `AppViewModel`：create/join 改异步（busy/error），进房间后监听 Firestore 成员 + RTDB
+  实时位置并合并成 `members`，定位权限授予后采集位置、3s 节流上传 RTDB。
+- `ui/screens/MapScreen.kt`：真实 **GoogleMap**(maps-compose) + accompanist 运行时权限
+  + 成员图钉(按状态着色) + 首次定位居中 + 房间码/人数 + 离开房间。
+- RoomChoice 接异步 busy/error；新增定位权限文案(zh/en)。
+
+**验证**
+- `./gradlew clean assembleDebug` **BUILD SUCCESSFUL**，产出 APK。
+  （修了两个：`setDisplayName` 改名；maps-compose 6.2.1 没有 `rememberUpdatedMarkerState`，
+  改用 `rememberMarkerState` + `LaunchedEffect` 更新位置。还遇到一次 R.jar 构建缓存文件锁，
+  `clean --no-build-cache` 后通过。）
+- ⚠️ 仅编译验证，**未真机/模拟器运行**；地图要显示需在 `local.properties` 填 `MAPS_API_KEY`。
+
+**未做（下一个 Android 增量）**
+- 罗盘方向指针(SensorManager)、成员详情/距离面板、改名、历史房间、track 模式、地图旋转/指南针。
+- 轨迹上传(appendTrackPoint) 与显示。
+- `google-services.json` 当前 gitignore；CI/他人需各自放置。Maps key 目前未绑定应用限制
+  （用户暂未限制），上线前应在 GCP 给安卓 key 加 包名+SHA-1 限制。
+
+---
+
 ## 2026-06-04 — Phase 5 起步：Android UI 骨架 ✅（可编译运行，无后端）
 
 **做了什么**

@@ -26,14 +26,20 @@ fun ZhinzenApp(viewModel: AppViewModel = viewModel()) {
                 Phase.Room ->
                     RoomChoiceScreen(
                         displayName = viewModel.displayName,
+                        busy = viewModel.busy,
+                        error = viewModel.errorMessage,
                         onCreate = viewModel::createRoom,
-                        onJoin = { viewModel.joinRoom(it) },
+                        onJoin = viewModel::joinRoom,
+                        onClearError = viewModel::clearError,
                     )
 
                 Phase.Map ->
                     MapScreen(
                         roomId = viewModel.roomId,
+                        members = viewModel.members,
+                        ownLocation = viewModel.ownLocation,
                         onLeave = viewModel::leaveRoom,
+                        onPermissionGranted = viewModel::onLocationPermissionGranted,
                     )
             }
         }

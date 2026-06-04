@@ -20,4 +20,6 @@
     <string name="map_coming_soon">Google Maps lands in the next step</string>
     <string name="edit_name">Edit name</string>
     <string name="save">Save</string>
+    <string name="location_permission_rationale">Location permission is needed to share your position and show it on the map</string>
+    <string name="grant_location">Allow location</string>
 </resources>
