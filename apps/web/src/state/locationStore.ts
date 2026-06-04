@@ -21,6 +21,8 @@ interface LocationState {
   error: GeolocationPositionError['code'] | 'unsupported' | null;
   startSharing: (input: StartSharingInput) => Promise<boolean>;
   refreshNow: () => Promise<boolean>;
+  /** Update the display name carried on future (and the current) live locations. */
+  updateDisplayName: (displayName: string) => void;
   stopSharing: () => Promise<void>;
 }
 
@@ -176,6 +178,20 @@ export const useLocationStore = create<LocationState>((set, get) => ({
         },
       );
     });
+  },
+  updateDisplayName: (displayName) => {
+    const trimmed = displayName.trim();
+    if (activeInput) activeInput = { ...activeInput, displayName: trimmed };
+
+    const current = get().current;
+    if (current) {
+      const updated = { ...current, displayName: trimmed, updatedAt: Date.now() };
+      set({ current: updated });
+      if (activeInput) {
+        lastUploadAt = Date.now();
+        void writeLiveLocation(activeInput.roomId, updated);
+      }
+    }
   },
   stopSharing: async () => {
     if (watchId !== null) {

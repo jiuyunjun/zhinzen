@@ -36,9 +36,13 @@ export function MapScreen({ onLeave }: { onLeave: () => void }) {
   const stopWatchingMembers = useMembersStore((s) => s.stopWatching);
   const startCompass = useSensorStore((s) => s.startCompass);
   const displayName = useDeviceStore((s) => s.displayName);
+  const setDisplayName = useDeviceStore((s) => s.setDisplayName);
   const deviceId = useDeviceStore((s) => s.deviceId);
   const deviceSecret = useDeviceStore((s) => s.deviceSecret);
+  const syncMembership = useRoomStore((s) => s.syncMembership);
+  const updateLocationName = useLocationStore((s) => s.updateDisplayName);
   const [recenterSignal, setRecenterSignal] = useState(0);
+  const [followMode, setFollowMode] = useState<'self' | 'free' | 'track'>('self');
   const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
   const [trackPoints, setTrackPoints] = useState<TrackPoint[]>([]);
   const { msg, flash } = useToast();
@@ -76,18 +80,10 @@ export function MapScreen({ onLeave }: { onLeave: () => void }) {
       cancelled = true;
       void stopLocationSharing();
     };
-  }, [
-    deviceId,
-    deviceSecret,
-    displayName,
-    flash,
-    roomId,
-    setSharing,
-    sharing,
-    startLocationSharing,
-    stopLocationSharing,
-    t,
-  ]);
+    // `displayName` is intentionally excluded: renames propagate via
+    // updateLocationName + syncMembership, so we don't restart the GPS watch.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deviceId, deviceSecret, flash, roomId, setSharing, sharing, startLocationSharing, stopLocationSharing, t]);
 
   useEffect(() => {
     if (locationError === 1 || locationError === 'unsupported') {
@@ -117,6 +113,7 @@ export function MapScreen({ onLeave }: { onLeave: () => void }) {
   useEffect(() => {
     if (selectedDeviceId && !members.some((member) => member.member.deviceId === selectedDeviceId)) {
       setSelectedDeviceId(null);
+      setFollowMode('self');
     }
   }, [members, selectedDeviceId]);
 
@@ -166,12 +163,30 @@ export function MapScreen({ onLeave }: { onLeave: () => void }) {
 
   const onSelectMember = (targetDeviceId: string) => {
     setSelectedDeviceId(targetDeviceId);
+    // Selecting another member enters track mode (frame me + them); selecting
+    // myself opens the self editor and keeps following me.
+    setFollowMode(targetDeviceId === deviceId ? 'self' : 'track');
     void startCompass();
   };
 
+  const onCloseDetail = () => {
+    setSelectedDeviceId(null);
+    setFollowMode('self');
+  };
+
   const onRecenter = () => {
+    setFollowMode('self');
     setRecenterSignal((value) => value + 1);
     flash(t('recenter'));
+  };
+
+  const onRename = (name: string) => {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    setDisplayName(trimmed);
+    updateLocationName(trimmed);
+    void syncMembership();
+    flash(t('nameUpdated'));
   };
 
   return (
@@ -188,10 +203,12 @@ export function MapScreen({ onLeave }: { onLeave: () => void }) {
         ownLocation={ownLocation}
         ownDisplayName={displayName}
         ownDeviceId={deviceId}
+        followMode={followMode}
         recenterSignal={recenterSignal}
         selectedDeviceId={selectedDeviceId}
         trackPoints={trackPoints}
         onSelectMember={onSelectMember}
+        onUserPan={() => setFollowMode('free')}
       />
 
       {/* top status bar */}
@@ -286,7 +303,7 @@ export function MapScreen({ onLeave }: { onLeave: () => void }) {
         <Fab icon="recenter" onClick={onRecenter} label="recenter" />
       </div>
 
-      {/* bottom sheet */}
+      {/* bottom sheet — capped height so the map stays visible above it */}
       <div
         style={{
           position: 'absolute',
@@ -299,6 +316,8 @@ export function MapScreen({ onLeave }: { onLeave: () => void }) {
           boxShadow: '0 -8px 30px rgba(0,0,0,0.14)',
           padding: '10px 18px max(30px, env(safe-area-inset-bottom))',
           color: tokens.ink,
+          maxHeight: 'min(46vh, 460px)',
+          overflowY: 'auto',
         }}
       >
         <div
@@ -310,19 +329,21 @@ export function MapScreen({ onLeave }: { onLeave: () => void }) {
             margin: '0 auto 14px',
           }}
         />
-        <MemberStrip
-          members={members}
-          selfName={displayName}
-          sharing={sharing}
-          selectedDeviceId={selectedDeviceId}
-          onSelect={onSelectMember}
-        />
-        {selectedMember && (
+        {selectedMember ? (
           <MemberDetailPanel
             member={selectedMember}
             ownLocation={effectiveOwnLocation}
-            onClose={() => setSelectedDeviceId(null)}
+            onClose={onCloseDetail}
             onLeaveRoom={onLeave}
+            onRename={onRename}
+          />
+        ) : (
+          <MemberStrip
+            members={members}
+            selfName={displayName}
+            sharing={sharing}
+            selectedDeviceId={selectedDeviceId}
+            onSelect={onSelectMember}
           />
         )}
       </div>

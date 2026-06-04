@@ -21,8 +21,21 @@ let listening = false;
 let removeListeners: (() => void) | null = null;
 let setStateRef: ((state: Partial<SensorState>) => void) | null = null;
 
+// Heading smoothing: raw compass readings jitter a lot on phones. We low-pass
+// them with a circular exponential moving average and only emit when the smoothed
+// value moves past a small threshold, so the on-screen arrow stays steady.
+const SMOOTHING_ALPHA = 0.18;
+const MIN_EMIT_DELTA_DEG = 0.6;
+let smoothedHeading: number | null = null;
+let lastEmittedHeading: number | null = null;
+
 function normalizeAngle(angle: number): number {
   return ((angle % 360) + 360) % 360;
+}
+
+/** Shortest signed angular distance from `current` to `target`, in (-180, 180]. */
+function shortestDelta(target: number, current: number): number {
+  return ((target - current + 540) % 360) - 180;
 }
 
 function headingFromEvent(event: DeviceOrientationEvent): number | null {
@@ -39,10 +52,21 @@ function headingFromEvent(event: DeviceOrientationEvent): number | null {
 }
 
 function onOrientation(event: DeviceOrientationEvent): void {
-  const heading = headingFromEvent(event);
-  if (heading === null) return;
+  const raw = headingFromEvent(event);
+  if (raw === null) return;
 
-  setStateRef?.({ heading, compassStatus: 'watching' });
+  smoothedHeading =
+    smoothedHeading === null
+      ? raw
+      : normalizeAngle(smoothedHeading + SMOOTHING_ALPHA * shortestDelta(raw, smoothedHeading));
+
+  if (
+    lastEmittedHeading === null ||
+    Math.abs(shortestDelta(smoothedHeading, lastEmittedHeading)) >= MIN_EMIT_DELTA_DEG
+  ) {
+    lastEmittedHeading = smoothedHeading;
+    setStateRef?.({ heading: smoothedHeading, compassStatus: 'watching' });
+  }
 }
 
 async function requestOrientationPermission(): Promise<boolean> {
@@ -92,6 +116,8 @@ export const useSensorStore = create<SensorState>((set) => {
       removeListeners?.();
       removeListeners = null;
       listening = false;
+      smoothedHeading = null;
+      lastEmittedHeading = null;
       set({ compassStatus: 'idle', heading: null });
     },
   };

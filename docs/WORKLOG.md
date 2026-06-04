@@ -5,6 +5,46 @@
 
 ---
 
+## 2026-06-03 — Phase 4 收尾 + 地图/改名体验改进 ✅
+
+**Phase 4 收尾（方向指针平滑）**
+- `sensorStore`：对罗盘朝向做圆周指数平滑（EMA，alpha 0.18）+ 阈值节流（变化 ≥0.6° 才
+  emit），消除箭头抖动。`stopCompass` 重置平滑状态。
+
+**改名（需求 1）**
+- `RoomChoice`：问候语旁加「改名字」按钮，点开内联输入 + 保存（仅本地 `setDisplayName`，
+  此时还没进房间）。
+- 地图自己详情面板（点底部「你」或地图蓝点）：内联名字输入 + 保存。保存时三处同步：
+  `deviceStore.setDisplayName`（本地+持久化）、`locationStore.updateDisplayName`（更新
+  activeInput + 立即补写一次 RTDB 实时位置）、`roomStore.syncMembership`（best-effort 重新
+  upsert Firestore 成员文档，让别人看到新名字）。
+- 为避免改名触发整段定位 effect 重启 GPS watch，已把 `displayName` 移出该 effect 依赖
+  （改名走上面三处同步）。
+
+**地图居中模式（需求 2/3/4）**
+- 新增 `followMode: 'self' | 'free' | 'track'`（默认 `self`）。
+- `self`：相机跟随自己位置（位置更新即 `panTo`）。
+- 用户拖动地图 → `GoogleMapView` 监听 `dragstart`（仅用户手势触发，程序化 panTo/fitBounds
+  不触发）→ 回调把 `followMode` 切为 `free`。
+- 点「回到我的位置」FAB → `followMode='self'` + `recenterSignal++` 强制回中。
+
+**追踪其他成员（需求 6）**
+- 点其他成员 → `followMode='track'`，`fitBounds(自己 + 目标)`，并给底部留 320px padding，
+  保证两个点都在 sheet 上方可见。仅在选择变化/点 recenter 时 fit 一次（不随目标移动重复
+  fit，避免抖动）。点自己 → 进自己详情且保持 `self` 跟随。关闭详情 → 回 `self`。
+
+**详情面板太高（需求 5）**
+- 选中成员时，底部 sheet 用详情面板**替换**成员横条（不再堆叠），并给 sheet 加
+  `maxHeight: min(46vh, 460px)` + `overflowY: auto`，地图信息不再被挡。
+- `MemberDetailPanel` 拆成自己面板（名字编辑 + 离开房间）与他人面板（距离 + 方向指针 +
+  Google 导航），去掉了原先堆叠用的上边框/外边距。
+
+**验证**
+- `npm run build` 通过。主 bundle 仍 ~708KB（既有 TODO：Firebase 代码拆分）。
+- 真机仍待验证：罗盘平滑效果、track 模式取景、改名跨端可见。
+
+---
+
 ## 2026-06-03 — Web 后台定位限制提示与前台刷新 ✅
 
 **做了什么**

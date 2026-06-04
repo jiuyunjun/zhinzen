@@ -27,6 +27,8 @@ interface RoomState {
   createRoom: () => Promise<string | null>;
   /** Join from a pasted invite link or raw code; returns the normalized id or null. */
   joinRoom: (input: string) => Promise<string | null>;
+  /** Best-effort re-upsert of this device's member record (e.g. after a rename). */
+  syncMembership: () => Promise<void>;
   leaveRoom: () => void;
   setSharing: (on: boolean) => void;
   clearError: () => void;
@@ -39,7 +41,7 @@ function syncUrl(roomId: string | null): void {
   }
 }
 
-export const useRoomStore = create<RoomState>((set) => ({
+export const useRoomStore = create<RoomState>((set, get) => ({
   roomId: null,
   // Pick up an invite link without joining until the backend validates it.
   pendingJoinCode: roomFromUrl(),
@@ -89,6 +91,24 @@ export const useRoomStore = create<RoomState>((set) => ({
       const roomError = toRoomApiError(error);
       set({ busy: false, error: roomError.code });
       return null;
+    }
+  },
+  syncMembership: async () => {
+    const roomId = get().roomId;
+    if (!roomId) return;
+    const device = useDeviceStore.getState();
+    try {
+      await joinRoomOnBackend({
+        ...buildRoomPayload({
+          deviceId: device.deviceId,
+          deviceSecret: device.deviceSecret,
+          displayName: device.displayName,
+          sharingLocation: get().sharing,
+        }),
+        roomId,
+      });
+    } catch {
+      // Best-effort: a failed rename sync shouldn't disrupt the session.
     }
   },
   leaveRoom: () => {

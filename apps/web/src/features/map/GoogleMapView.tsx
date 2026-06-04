@@ -7,15 +7,21 @@ import { loadGoogleMaps } from '../../lib/googleMaps';
 import type { MemberView, MemberViewStatus } from '../../state/membersStore';
 import { useUiStore } from '../../state/uiStore';
 
+type FollowMode = 'self' | 'free' | 'track';
+
 interface GoogleMapViewProps {
   members: MemberView[];
   ownLocation: LiveLocation | null;
   ownDisplayName: string;
   ownDeviceId: string;
+  /** Camera behavior: follow self, free pan, or frame self + tracked member. */
+  followMode: FollowMode;
   recenterSignal: number;
   selectedDeviceId: string | null;
   trackPoints: TrackPoint[];
   onSelectMember: (deviceId: string) => void;
+  /** Fired when the user drags the map, so the parent can drop follow mode. */
+  onUserPan: () => void;
 }
 
 interface MapPin {
@@ -50,17 +56,20 @@ export function GoogleMapView({
   ownLocation,
   ownDisplayName,
   ownDeviceId,
+  followMode,
   recenterSignal,
   selectedDeviceId,
   trackPoints,
   onSelectMember,
+  onUserPan,
 }: GoogleMapViewProps) {
   const t = useUiStore((s) => s.t);
   const mapEl = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<google.maps.Map | null>(null);
   const markersRef = useRef<Map<string, google.maps.Marker>>(new Map());
   const trackSegmentsRef = useRef<google.maps.Polyline[]>([]);
-  const initializedRef = useRef(false);
+  const onUserPanRef = useRef(onUserPan);
+  onUserPanRef.current = onUserPan;
   const [loadState, setLoadState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
 
   const pins = useMemo(
@@ -68,7 +77,13 @@ export function GoogleMapView({
     [members, ownDeviceId, ownDisplayName, ownLocation],
   );
 
-  const focusLocation = pins.find((pin) => pin.isSelf)?.location ?? pins[0]?.location ?? null;
+  const selfLocation = pins.find((pin) => pin.isSelf)?.location ?? null;
+  const focusLocation = selfLocation ?? pins[0]?.location ?? null;
+  const targetLocation =
+    pins.find((pin) => !pin.isSelf && pin.id === selectedDeviceId)?.location ?? null;
+  // Track the moving lat/lng as primitives so follow effects re-run on movement.
+  const focusLat = focusLocation?.lat ?? null;
+  const focusLng = focusLocation?.lng ?? null;
 
   useEffect(() => {
     if (!mapEl.current || !isMapsConfigured()) return;
@@ -80,7 +95,7 @@ export function GoogleMapView({
       .then((maps) => {
         if (cancelled || !mapEl.current) return;
 
-        mapRef.current = new maps.Map(mapEl.current, {
+        const map = new maps.Map(mapEl.current, {
           center: toLatLng(focusLocation) ?? DEFAULT_CENTER,
           zoom: DEFAULT_ZOOM,
           disableDefaultUI: true,
@@ -89,6 +104,10 @@ export function GoogleMapView({
           gestureHandling: 'greedy',
           styles: MAP_STYLES,
         });
+        // Only a user gesture fires `dragstart` (programmatic panTo/fitBounds do
+        // not), so this cleanly drops follow mode when the user moves the map.
+        map.addListener('dragstart', () => onUserPanRef.current());
+        mapRef.current = map;
         setLoadState('ready');
       })
       .catch(() => {
@@ -102,7 +121,6 @@ export function GoogleMapView({
       clearTrackSegments(trackSegmentsRef.current);
       trackSegmentsRef.current = [];
       mapRef.current = null;
-      initializedRef.current = false;
     };
   }, []);
 
@@ -111,11 +129,6 @@ export function GoogleMapView({
     if (!map) return;
 
     syncMarkers(map, markersRef.current, pins, selectedDeviceId, onSelectMember);
-
-    if (!initializedRef.current && pins.length > 0) {
-      initializedRef.current = true;
-      fitMapToPins(map, pins);
-    }
   }, [onSelectMember, pins, selectedDeviceId]);
 
   useEffect(() => {
@@ -125,13 +138,37 @@ export function GoogleMapView({
     syncTrackSegments(map, trackSegmentsRef.current, trackPoints);
   }, [trackPoints]);
 
+  // Follow self: keep the camera on the user's marker as it moves. `recenterSignal`
+  // forces a re-center even if the position has not changed (the recenter button).
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !focusLocation || recenterSignal === 0) return;
+    if (!map || followMode !== 'self' || focusLat === null || focusLng === null) return;
 
-    map.panTo(toLatLng(focusLocation)!);
+    map.panTo({ lat: focusLat, lng: focusLng });
     if ((map.getZoom() ?? 0) < DEFAULT_ZOOM) map.setZoom(DEFAULT_ZOOM);
-  }, [recenterSignal]);
+  }, [followMode, focusLat, focusLng, recenterSignal]);
+
+  // Track mode: frame self + the selected member once on selection (not on every
+  // position tick, to avoid jitter). Extra bottom padding keeps both pins above
+  // the bottom sheet. `recenterSignal` lets the recenter button re-fit.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || followMode !== 'track') return;
+
+    const self = toLatLng(focusLocation);
+    const target = toLatLng(targetLocation);
+    if (self && target) {
+      const bounds = new google.maps.LatLngBounds();
+      bounds.extend(self);
+      bounds.extend(target);
+      map.fitBounds(bounds, { top: 110, right: 64, bottom: 320, left: 64 });
+    } else if (target) {
+      map.panTo(target);
+    } else if (self) {
+      map.panTo(self);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [followMode, selectedDeviceId, recenterSignal]);
 
   return (
     <div style={{ position: 'absolute', inset: 0 }}>
@@ -245,24 +282,6 @@ function opacityForStatus(status: MemberViewStatus): number {
   if (status === 'offline') return 0.56;
   if (status === 'stale') return 0.72;
   return 1;
-}
-
-function fitMapToPins(map: google.maps.Map, pins: MapPin[]): void {
-  if (pins.length === 0) {
-    map.setCenter(DEFAULT_CENTER);
-    map.setZoom(DEFAULT_ZOOM);
-    return;
-  }
-
-  if (pins.length === 1) {
-    map.setCenter(toLatLng(pins[0].location)!);
-    map.setZoom(DEFAULT_ZOOM);
-    return;
-  }
-
-  const bounds = new google.maps.LatLngBounds();
-  for (const pin of pins) bounds.extend(toLatLng(pin.location)!);
-  map.fitBounds(bounds, 80);
 }
 
 function clearMarkers(markers: Map<string, google.maps.Marker>): void {

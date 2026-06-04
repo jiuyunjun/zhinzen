@@ -16,6 +16,9 @@ import { Icon, type IconName } from '../../components/Icon';
 export function RoomChoice({ onEnterRoom }: { onEnterRoom: () => void }) {
   const t = useUiStore((s) => s.t);
   const displayName = useDeviceStore((s) => s.displayName);
+  const setDisplayName = useDeviceStore((s) => s.setDisplayName);
+  const [editingName, setEditingName] = useState(false);
+  const [nameDraft, setNameDraft] = useState(displayName);
   const createRoom = useRoomStore((s) => s.createRoom);
   const joinRoom = useRoomStore((s) => s.joinRoom);
   const pendingJoinCode = useRoomStore((s) => s.pendingJoinCode);
@@ -33,6 +36,16 @@ export function RoomChoice({ onEnterRoom }: { onEnterRoom: () => void }) {
     if (busy) return;
     const roomId = await joinRoom(code);
     if (roomId) onEnterRoom();
+  };
+
+  const startEditingName = () => {
+    setNameDraft(displayName);
+    setEditingName(true);
+  };
+  const saveName = () => {
+    const trimmed = nameDraft.trim();
+    if (trimmed) setDisplayName(trimmed);
+    setEditingName(false);
   };
 
   return (
@@ -53,17 +66,99 @@ export function RoomChoice({ onEnterRoom }: { onEnterRoom: () => void }) {
       <div style={{ maxWidth: 440, width: '100%', margin: '0 auto' }}>
         <div style={{ paddingTop: 'max(80px, calc(env(safe-area-inset-top) + 64px))' }}>
           <Wordmark size={22} color={tokens.inkSoft} />
-          <h1
-            style={{
-              fontSize: 26,
-              fontWeight: 700,
-              letterSpacing: '-0.02em',
-              color: tokens.ink,
-              margin: '18px 0 4px',
-            }}
-          >
-            {t('hi', { name: displayName || t('you') })}
-          </h1>
+          {editingName ? (
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', margin: '18px 0 4px' }}>
+              <input
+                value={nameDraft}
+                onChange={(e) => setNameDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') saveName();
+                  if (e.key === 'Escape') setEditingName(false);
+                }}
+                placeholder={t('namePh')}
+                autoFocus
+                autoComplete="off"
+                style={{
+                  flex: 1,
+                  minWidth: 0,
+                  height: 44,
+                  boxSizing: 'border-box',
+                  padding: '0 14px',
+                  fontSize: 20,
+                  fontWeight: 700,
+                  fontFamily: 'inherit',
+                  color: tokens.ink,
+                  background: '#fff',
+                  border: `1.5px solid ${tokens.line}`,
+                  borderRadius: 12,
+                  outline: 'none',
+                }}
+              />
+              <button
+                type="button"
+                onClick={saveName}
+                disabled={!nameDraft.trim()}
+                style={{
+                  height: 44,
+                  padding: '0 16px',
+                  borderRadius: 12,
+                  border: 'none',
+                  cursor: nameDraft.trim() ? 'pointer' : 'default',
+                  background: nameDraft.trim() ? tokens.self : withAlpha(tokens.offline, 0.2),
+                  color: nameDraft.trim() ? '#fff' : tokens.inkFaint,
+                  fontFamily: 'inherit',
+                  fontSize: 14,
+                  fontWeight: 700,
+                  flexShrink: 0,
+                }}
+              >
+                {t('save')}
+              </button>
+            </div>
+          ) : (
+            <h1
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                fontSize: 26,
+                fontWeight: 700,
+                letterSpacing: '-0.02em',
+                color: tokens.ink,
+                margin: '18px 0 4px',
+              }}
+            >
+              <span
+                style={{
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {t('hi', { name: displayName || t('you') })}
+              </span>
+              <button
+                type="button"
+                onClick={startEditingName}
+                aria-label={t('editName')}
+                style={{
+                  flexShrink: 0,
+                  height: 30,
+                  padding: '0 10px',
+                  borderRadius: 9,
+                  border: `1px solid ${tokens.line}`,
+                  background: '#fff',
+                  color: tokens.inkSoft,
+                  cursor: 'pointer',
+                  fontFamily: 'inherit',
+                  fontSize: 12.5,
+                  fontWeight: 600,
+                }}
+              >
+                {t('editName')}
+              </button>
+            </h1>
+          )}
           <p style={{ fontSize: 15, color: tokens.inkSoft, margin: 0 }}>{t('pickAction')}</p>
         </div>
 
