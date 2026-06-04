@@ -5,6 +5,54 @@
 
 ---
 
+## 2026-06-04 — Phase 5 起步：Android UI 骨架 ✅（可编译运行，无后端）
+
+**做了什么**
+新建 `apps/android/`：Kotlin + Jetpack Compose 的可编译 App 骨架，跑通
+onboarding → room → map 占位流程，复用设计 token。**暂不接后端**（创建/加入只改本地
+状态），和 web 的 Phase 1 节奏一致。Firebase/Maps/定位放下一增量。
+
+**结构**
+- Gradle：`settings.gradle.kts` / `build.gradle.kts` / `gradle.properties` /
+  版本目录 `gradle/libs.versions.toml`（AGP 8.7.3、Kotlin 2.0.21、Compose BOM
+  2024.12.01）。`app/build.gradle.kts`：namespace/appId `com.zhinzen.app`，
+  minSdk 26 / target 35 / compile 35，`buildToolsVersion = "34.0.0"`（本机没装
+  35.0.0，34 是 AGP 8.7 的下限）。
+- 代码（`app/src/main/kotlin/com/zhinzen/app/`）：`MainActivity`、`ZhinzenApp`
+  (phase 路由)、`AppViewModel`(AndroidViewModel，phase/name/roomId)、
+  `device/DeviceIdentity`(SharedPreferences 存 deviceId/secret/name，对应 §2.2)、
+  `data/RoomCode`(Crockford base32，对应 web roomCode)、`ui/theme/*`(token 颜色，
+  sRGB 近似 web oklch)、`ui/screens/*`(Onboarding/RoomChoice/Map 占位/Components)。
+- 资源：`values/`(中文，zh-first) + `values-en/`(英文)、`themes.xml`(NoActionBar，
+  无需 Material Components 依赖)、`drawable/ic_launcher.xml`(矢量图标)、`colors.xml`。
+
+**关键决策**
+- 包管理：apps/android 不纳入根 npm workspaces（Gradle 独立）。
+- 颜色 token 在 Kotlin 里重新定义为 sRGB 近似值（Compose 不支持 oklch），需与
+  `packages/shared-ui` 大致同步。
+- 数据模型（RoomCode、DeviceIdentity）在 Kotlin 里**镜像** web/shared-types 的逻辑
+  （TS 无法直接复用），保持行为一致（房间码字母表/长度一致，跨端可互相加入）。
+- 避免了实验性 API（不用 `Card(onClick)`，改 `Modifier.clickable`）。
+
+**验证（实测 CLI 构建）**
+- 本机已装 Android SDK（platforms 34/35/36，build-tools 34/36）+ Android Studio + JDK 21。
+- 用 Gradle 8.11.1 生成 wrapper（已提交 `gradlew`/`gradle-wrapper.jar`）。
+- `./gradlew assembleDebug` **BUILD SUCCESSFUL**，产出 `app-debug.apk`（~9.5MB）。
+  （修了一个编译错误：`fun setDisplayName` 与 `var displayName` 的生成 setter 冲突 →
+  改名 `updateDisplayName`。）
+- `local.properties`(sdk.dir) 与 `**/build/` 已 gitignore，未提交。
+
+**下一步（Android 增量）**
+1. 接 Firebase：在 Firebase 控制台**注册 Android 应用**(包名 `com.zhinzen.app`) 拿
+   `google-services.json` 放 `apps/android/app/`，加 google-services 插件 + BoM；
+   复用现有 `createRoom/joinRoom/appendTrackPoint`(asia-northeast1) callable。
+2. Maps：申请**带签名 SHA-1 的 Android Maps key**(Maps SDK for Android)，接 Maps Compose。
+3. 定位：Fused Location Provider + 运行时权限，上传 RTDB `liveLocations`。
+4. 方向指针：SensorManager(罗盘) + geo 计算（镜像 web）。
+5. 历史房间、改名、track 模式等对齐 web。
+
+---
+
 ## 2026-06-03 — 地图旋转/指南针、查看所有人、历史房间 ✅
 
 **1) 地图旋转 + 指南针按钮（heading-up）**

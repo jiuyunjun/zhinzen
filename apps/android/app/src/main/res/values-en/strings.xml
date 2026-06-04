@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Zhinzen</string>
+    <string name="tagline">Find the people right around you, live</string>
+    <string name="no_account">No sign-up · No login · This device is you</string>
+    <string name="your_name">Your name</string>
+    <string name="name_placeholder">Enter a display name</string>
+    <string name="continue_action">Continue</string>
+    <string name="hi">Hi, %1$s</string>
+    <string name="pick_action">Create a room, or join a friend\'s</string>
+    <string name="create_room">Create a room</string>
+    <string name="create_room_sub">Get an invite link and call your people</string>
+    <string name="join_room">Join a room</string>
+    <string name="join_room_sub">Paste an invite link or room code</string>
+    <string name="join_placeholder">Invite link or room code</string>
+    <string name="join">Join</string>
+    <string name="you">You</string>
+    <string name="room_code">Room code</string>
+    <string name="leave_room">Leave room</string>
+    <string name="map_coming_soon">Google Maps lands in the next step</string>
+    <string name="edit_name">Edit name</string>
+    <string name="save">Save</string>
+</resources>

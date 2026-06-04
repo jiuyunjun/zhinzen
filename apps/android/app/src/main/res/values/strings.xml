@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Default (Chinese-first, per design.md §3.1 / agents.md §1). English in values-en. -->
+<resources>
+    <string name="app_name">Zhinzen</string>
+    <string name="tagline">和身边的人，实时互相找到</string>
+    <string name="no_account">无需注册 · 无需登录 · 这台设备就是你</string>
+    <string name="your_name">你的名字</string>
+    <string name="name_placeholder">输入一个显示姓名</string>
+    <string name="continue_action">继续</string>
+    <string name="hi">你好，%1$s</string>
+    <string name="pick_action">创建一个房间，或加入朋友的房间</string>
+    <string name="create_room">创建房间</string>
+    <string name="create_room_sub">生成邀请链接，叫上你的人</string>
+    <string name="join_room">加入房间</string>
+    <string name="join_room_sub">粘贴邀请链接或房间码</string>
+    <string name="join_placeholder">邀请链接 或 房间码</string>
+    <string name="join">加入</string>
+    <string name="you">你</string>
+    <string name="room_code">房间码</string>
+    <string name="leave_room">离开房间</string>
+    <string name="map_coming_soon">地图将在下一步接入 Google 地图</string>
+    <string name="edit_name">改名字</string>
+    <string name="save">保存</string>
+</resources>
