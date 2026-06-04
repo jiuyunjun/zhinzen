@@ -9,6 +9,18 @@ const env = import.meta.env;
 
 export const mapsApiKey: string = env.VITE_MAPS_API_KEY ?? '';
 
+/**
+ * Optional Google Maps Map ID. A vector Map ID enables map rotation/heading
+ * (the compass + heading-up feature). Without it the map renders as a raster
+ * basemap that cannot rotate. Create one in Google Cloud → Maps → Map Management.
+ */
+export const mapsMapId: string = env.VITE_MAPS_MAP_ID ?? '';
+
+/** True when a vector Map ID is configured (rotation/heading available). */
+export function isMapRotatable(): boolean {
+  return mapsMapId.length > 0;
+}
+
 export interface FirebaseConfig {
   apiKey: string;
   authDomain: string;

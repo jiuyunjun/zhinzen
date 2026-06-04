@@ -7,6 +7,8 @@ import { Wordmark } from '../../components/Wordmark';
 import { PrimaryButton } from '../../components/PrimaryButton';
 import { LangToggle } from '../../components/LangToggle';
 import { Icon, type IconName } from '../../components/Icon';
+import { formatRoomCode } from '../../lib/roomCode';
+import { getRoomHistory, removeRoomFromHistory } from '../../lib/roomHistory';
 
 /**
  * Room choice — create a new room or join one via invite link / code
@@ -26,6 +28,7 @@ export function RoomChoice({ onEnterRoom }: { onEnterRoom: () => void }) {
   const error = useRoomStore((s) => s.error);
   const clearError = useRoomStore((s) => s.clearError);
   const [code, setCode] = useState(pendingJoinCode ?? '');
+  const [history, setHistory] = useState(getRoomHistory);
 
   const onCreate = async () => {
     if (busy) return;
@@ -36,6 +39,16 @@ export function RoomChoice({ onEnterRoom }: { onEnterRoom: () => void }) {
     if (busy) return;
     const roomId = await joinRoom(code);
     if (roomId) onEnterRoom();
+  };
+
+  const onJoinFromHistory = async (roomId: string) => {
+    if (busy) return;
+    const joined = await joinRoom(roomId);
+    if (joined) onEnterRoom();
+  };
+
+  const onRemoveHistory = (roomId: string) => {
+    setHistory(removeRoomFromHistory(roomId));
   };
 
   const startEditingName = () => {
@@ -233,9 +246,114 @@ export function RoomChoice({ onEnterRoom }: { onEnterRoom: () => void }) {
             </div>
           )}
         </div>
+
+        {history.length > 0 && (
+          <div style={{ marginTop: 26 }}>
+            <div
+              style={{
+                fontSize: 12.5,
+                fontWeight: 700,
+                color: tokens.inkFaint,
+                letterSpacing: '0.02em',
+                marginBottom: 10,
+              }}
+            >
+              {t('recentRooms')}
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {history.map((entry) => (
+                <div key={entry.roomId} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <button
+                    type="button"
+                    onClick={() => onJoinFromHistory(entry.roomId)}
+                    disabled={busy}
+                    style={{
+                      flex: 1,
+                      minWidth: 0,
+                      textAlign: 'left',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 12,
+                      padding: '12px 14px',
+                      background: '#fff',
+                      border: `1.5px solid ${tokens.line}`,
+                      borderRadius: 14,
+                      cursor: busy ? 'default' : 'pointer',
+                      fontFamily: 'inherit',
+                    }}
+                  >
+                    <div
+                      style={{
+                        width: 36,
+                        height: 36,
+                        borderRadius: 11,
+                        background: withAlpha(tokens.target, 0.14),
+                        color: tokens.target,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        flexShrink: 0,
+                      }}
+                    >
+                      <Icon name="people" size={18} />
+                    </div>
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <div
+                        style={{
+                          fontFamily: 'var(--zz-font-mono)',
+                          fontSize: 14,
+                          fontWeight: 700,
+                          color: tokens.ink,
+                          letterSpacing: '0.06em',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {formatRoomCode(entry.roomId)}
+                      </div>
+                      <div style={{ fontSize: 11.5, color: tokens.inkFaint, marginTop: 2 }}>
+                        {formatJoinedAgo(entry.lastJoinedAt)}
+                      </div>
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onRemoveHistory(entry.roomId)}
+                    aria-label={t('removeRoom')}
+                    style={{
+                      width: 36,
+                      height: 36,
+                      borderRadius: 11,
+                      border: `1.5px solid ${tokens.line}`,
+                      background: '#fff',
+                      color: tokens.inkFaint,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      flexShrink: 0,
+                    }}
+                  >
+                    <Icon name="trash" size={16} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
+}
+
+function formatJoinedAgo(ts: number): string {
+  const minutes = Math.max(0, Math.round((Date.now() - ts) / 60000));
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours}h`;
+  return `${Math.round(hours / 24)}d`;
 }
 
 function ChoiceCard({

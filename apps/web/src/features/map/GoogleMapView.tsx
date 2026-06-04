@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { LiveLocation, TrackPoint } from '@zhinzen/shared-types';
 import { color as tokens, font, withAlpha } from '@zhinzen/shared-ui';
 
-import { isMapsConfigured } from '../../lib/env';
+import { isMapsConfigured, mapsMapId } from '../../lib/env';
 import { loadGoogleMaps } from '../../lib/googleMaps';
 import type { MemberView, MemberViewStatus } from '../../state/membersStore';
 import { useUiStore } from '../../state/uiStore';
@@ -17,11 +17,19 @@ interface GoogleMapViewProps {
   /** Camera behavior: follow self, free pan, or frame self + tracked member. */
   followMode: FollowMode;
   recenterSignal: number;
+  /** Bump to frame every visible member (the "show everyone" button). */
+  fitAllSignal: number;
+  /** When true, rotate the map so the device's compass heading points up. */
+  headingUp: boolean;
+  /** Latest device compass heading (degrees, 0 = north), or null. */
+  deviceHeading: number | null;
   selectedDeviceId: string | null;
   trackPoints: TrackPoint[];
   onSelectMember: (deviceId: string) => void;
   /** Fired when the user drags the map, so the parent can drop follow mode. */
   onUserPan: () => void;
+  /** Reports the map's current heading (degrees) so the parent can draw the compass. */
+  onHeadingChange: (heading: number) => void;
 }
 
 interface MapPin {
@@ -58,10 +66,14 @@ export function GoogleMapView({
   ownDeviceId,
   followMode,
   recenterSignal,
+  fitAllSignal,
+  headingUp,
+  deviceHeading,
   selectedDeviceId,
   trackPoints,
   onSelectMember,
   onUserPan,
+  onHeadingChange,
 }: GoogleMapViewProps) {
   const t = useUiStore((s) => s.t);
   const mapEl = useRef<HTMLDivElement | null>(null);
@@ -70,6 +82,8 @@ export function GoogleMapView({
   const trackSegmentsRef = useRef<google.maps.Polyline[]>([]);
   const onUserPanRef = useRef(onUserPan);
   onUserPanRef.current = onUserPan;
+  const onHeadingChangeRef = useRef(onHeadingChange);
+  onHeadingChangeRef.current = onHeadingChange;
   const [loadState, setLoadState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
 
   const pins = useMemo(
@@ -95,18 +109,31 @@ export function GoogleMapView({
       .then((maps) => {
         if (cancelled || !mapEl.current) return;
 
-        const map = new maps.Map(mapEl.current, {
+        // A vector Map ID unlocks rotation/heading; without it we fall back to a
+        // raster map with inline styles (no rotation). Vector maps are styled in
+        // the cloud, so `styles` is omitted when a mapId is present.
+        const rotatable = mapsMapId.length > 0;
+        const options: google.maps.MapOptions = {
           center: toLatLng(focusLocation) ?? DEFAULT_CENTER,
           zoom: DEFAULT_ZOOM,
           disableDefaultUI: true,
           clickableIcons: false,
           keyboardShortcuts: false,
           gestureHandling: 'greedy',
-          styles: MAP_STYLES,
-        });
+        };
+        if (rotatable) {
+          options.mapId = mapsMapId;
+          options.rotateControl = true;
+          (options as { headingInteractionEnabled?: boolean }).headingInteractionEnabled = true;
+        } else {
+          options.styles = MAP_STYLES;
+        }
+
+        const map = new maps.Map(mapEl.current, options);
         // Only a user gesture fires `dragstart` (programmatic panTo/fitBounds do
         // not), so this cleanly drops follow mode when the user moves the map.
         map.addListener('dragstart', () => onUserPanRef.current());
+        map.addListener('heading_changed', () => onHeadingChangeRef.current(map.getHeading() ?? 0));
         mapRef.current = map;
         setLoadState('ready');
       })
@@ -169,6 +196,26 @@ export function GoogleMapView({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [followMode, selectedDeviceId, recenterSignal]);
+
+  // Heading-up: rotate the map to match the device compass; off → snap to north.
+  // No-op on raster maps (no Map ID), where setHeading has no visible effect.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    if (headingUp && deviceHeading !== null) {
+      map.setHeading(deviceHeading);
+    } else if (!headingUp) {
+      map.setHeading(0);
+    }
+  }, [headingUp, deviceHeading]);
+
+  // Show everyone: frame all visible pins with padding for the bottom sheet.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || fitAllSignal === 0) return;
+    fitToPins(map, pins, { top: 110, right: 64, bottom: 320, left: 64 });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fitAllSignal]);
 
   return (
     <div style={{ position: 'absolute', inset: 0 }}>
@@ -282,6 +329,22 @@ function opacityForStatus(status: MemberViewStatus): number {
   if (status === 'offline') return 0.56;
   if (status === 'stale') return 0.72;
   return 1;
+}
+
+function fitToPins(
+  map: google.maps.Map,
+  pins: MapPin[],
+  padding: google.maps.Padding,
+): void {
+  if (pins.length === 0) return;
+  if (pins.length === 1) {
+    map.panTo(toLatLng(pins[0].location)!);
+    if ((map.getZoom() ?? 0) < DEFAULT_ZOOM) map.setZoom(DEFAULT_ZOOM);
+    return;
+  }
+  const bounds = new google.maps.LatLngBounds();
+  for (const pin of pins) bounds.extend(toLatLng(pin.location)!);
+  map.fitBounds(bounds, padding);
 }
 
 function clearMarkers(markers: Map<string, google.maps.Marker>): void {

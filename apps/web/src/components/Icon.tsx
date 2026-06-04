@@ -13,7 +13,10 @@ export type IconName =
   | 'close'
   | 'back'
   | 'nav'
-  | 'globe';
+  | 'globe'
+  | 'compass'
+  | 'fitAll'
+  | 'trash';
 
 interface IconProps {
   name: IconName;
@@ -60,6 +63,30 @@ const PATHS: Record<IconName, JSX.Element> = {
     <>
       <circle cx="12" cy="12" r="9" />
       <path d="M3 12h18M12 3c2.5 2.4 2.5 15.6 0 18M12 3c-2.5 2.4-2.5 15.6 0 18" />
+    </>
+  ),
+  // North-pointing needle in a ring; rotate the whole icon to reflect heading.
+  compass: (
+    <>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 6.5V17" />
+      <path d="M9.4 9.1L12 6.5l2.6 2.6" />
+    </>
+  ),
+  // Four corner brackets — "fit everything in view".
+  fitAll: (
+    <>
+      <path d="M4 9V5.5A1.5 1.5 0 015.5 4H9" />
+      <path d="M15 4h3.5A1.5 1.5 0 0120 5.5V9" />
+      <path d="M20 15v3.5a1.5 1.5 0 01-1.5 1.5H15" />
+      <path d="M9 20H5.5A1.5 1.5 0 014 18.5V15" />
+    </>
+  ),
+  trash: (
+    <>
+      <path d="M5 7h14" />
+      <path d="M9 7V5a1 1 0 011-1h4a1 1 0 011 1v2" />
+      <path d="M7 7l1 12.5a1.5 1.5 0 001.5 1.4h5a1.5 1.5 0 001.5-1.4L17 7" />
     </>
   ),
 };

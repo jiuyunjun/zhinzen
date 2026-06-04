@@ -10,6 +10,7 @@ import { useUiStore } from '../../state/uiStore';
 import { Icon, type IconName } from '../../components/Icon';
 import { Toast, useToast } from '../../components/Toast';
 import { LangToggle } from '../../components/LangToggle';
+import { isMapRotatable } from '../../lib/env';
 import { formatRoomCode, inviteLink } from '../../lib/roomCode';
 import { fetchRecentTrackPoints } from '../../lib/trackApi';
 import { GoogleMapView } from './GoogleMapView';
@@ -35,6 +36,7 @@ export function MapScreen({ onLeave }: { onLeave: () => void }) {
   const watchMembers = useMembersStore((s) => s.watchRoom);
   const stopWatchingMembers = useMembersStore((s) => s.stopWatching);
   const startCompass = useSensorStore((s) => s.startCompass);
+  const sensorHeading = useSensorStore((s) => s.heading);
   const displayName = useDeviceStore((s) => s.displayName);
   const setDisplayName = useDeviceStore((s) => s.setDisplayName);
   const deviceId = useDeviceStore((s) => s.deviceId);
@@ -42,7 +44,10 @@ export function MapScreen({ onLeave }: { onLeave: () => void }) {
   const syncMembership = useRoomStore((s) => s.syncMembership);
   const updateLocationName = useLocationStore((s) => s.updateDisplayName);
   const [recenterSignal, setRecenterSignal] = useState(0);
+  const [fitAllSignal, setFitAllSignal] = useState(0);
   const [followMode, setFollowMode] = useState<'self' | 'free' | 'track'>('self');
+  const [headingUp, setHeadingUp] = useState(false);
+  const [mapHeading, setMapHeading] = useState(0);
   const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
   const [trackPoints, setTrackPoints] = useState<TrackPoint[]>([]);
   const { msg, flash } = useToast();
@@ -180,6 +185,27 @@ export function MapScreen({ onLeave }: { onLeave: () => void }) {
     flash(t('recenter'));
   };
 
+  const onFitAll = () => {
+    setFollowMode('free');
+    setFitAllSignal((value) => value + 1);
+    flash(t('fitAll'));
+  };
+
+  const onToggleHeadingUp = () => {
+    if (!isMapRotatable()) {
+      flash(t('rotateNeedsMapId'));
+      return;
+    }
+    const next = !headingUp;
+    setHeadingUp(next);
+    if (next) {
+      void startCompass();
+      flash(t('headingUpOn'));
+    } else {
+      flash(t('headingUpOff'));
+    }
+  };
+
   const onRename = (name: string) => {
     const trimmed = name.trim();
     if (!trimmed) return;
@@ -205,10 +231,14 @@ export function MapScreen({ onLeave }: { onLeave: () => void }) {
         ownDeviceId={deviceId}
         followMode={followMode}
         recenterSignal={recenterSignal}
+        fitAllSignal={fitAllSignal}
+        headingUp={headingUp}
+        deviceHeading={headingUp ? sensorHeading : null}
         selectedDeviceId={selectedDeviceId}
         trackPoints={trackPoints}
         onSelectMember={onSelectMember}
         onUserPan={() => setFollowMode('free')}
+        onHeadingChange={setMapHeading}
       />
 
       {/* top status bar */}
@@ -295,6 +325,14 @@ export function MapScreen({ onLeave }: { onLeave: () => void }) {
         }}
       >
         <Fab
+          icon="compass"
+          active={headingUp}
+          onClick={onToggleHeadingUp}
+          label={t('compass')}
+          iconRotation={-mapHeading}
+        />
+        <Fab icon="fitAll" onClick={onFitAll} label={t('fitAll')} />
+        <Fab
           icon={sharing ? 'pause' : 'play'}
           active={!sharing}
           onClick={onToggleSharing}
@@ -358,11 +396,14 @@ function Fab({
   onClick,
   active = false,
   label,
+  iconRotation,
 }: {
   icon: IconName;
   onClick: () => void;
   active?: boolean;
   label: string;
+  /** Rotate just the glyph (e.g. compass needle tracking map heading). */
+  iconRotation?: number;
 }) {
   return (
     <button
@@ -385,7 +426,15 @@ function Fab({
         justifyContent: 'center',
       }}
     >
-      <Icon name={icon} size={22} strokeWidth={2.1} />
+      <span
+        style={{
+          display: 'flex',
+          transform: iconRotation !== undefined ? `rotate(${iconRotation}deg)` : undefined,
+          transition: 'transform 120ms ease',
+        }}
+      >
+        <Icon name={icon} size={22} strokeWidth={2.1} />
+      </span>
     </button>
   );
 }

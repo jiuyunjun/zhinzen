@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { parseRoomInput, roomFromUrl } from '../lib/roomCode';
+import { addRoomToHistory } from '../lib/roomHistory';
 import { useDeviceStore } from './deviceStore';
 import {
   buildRoomPayload,
@@ -61,6 +62,7 @@ export const useRoomStore = create<RoomState>((set, get) => ({
         }),
       );
       syncUrl(room.roomId);
+      addRoomToHistory(room.roomId);
       set({ roomId: room.roomId, pendingJoinCode: null, sharing: true, busy: false });
       return room.roomId;
     } catch (error) {
@@ -85,6 +87,7 @@ export const useRoomStore = create<RoomState>((set, get) => ({
         roomId,
       });
       syncUrl(room.roomId);
+      addRoomToHistory(room.roomId);
       set({ roomId: room.roomId, pendingJoinCode: null, sharing: true, busy: false });
       return room.roomId;
     } catch (error) {

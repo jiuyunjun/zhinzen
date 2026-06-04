@@ -5,6 +5,40 @@
 
 ---
 
+## 2026-06-03 — 地图旋转/指南针、查看所有人、历史房间 ✅
+
+**1) 地图旋转 + 指南针按钮（heading-up）**
+- 新增 env `VITE_MAPS_MAP_ID`（`env.ts` 的 `mapsMapId` / `isMapRotatable()`，
+  `vite-env.d.ts` + `.env.example` + `.env.local` 占位）。**矢量 Map ID 才能让地图旋转**
+  （Google Maps JS API：栅格底图不支持旋转/heading）。需在 Google Cloud → Maps → Map
+  Management 创建一个 JS 矢量 Map ID 填进 `.env.local`。
+- `GoogleMapView`：有 mapId 时用矢量底图 + `rotateControl` + `headingInteractionEnabled`
+  （此时不传 `styles`，矢量样式在云端配）；监听 `heading_changed` 回传地图朝向。新增
+  `headingUp` 模式：开 → `map.setHeading(deviceHeading)`（用 sensorStore 罗盘，随手机转）；
+  关 → `setHeading(0)`（正北朝上）。
+- `MapScreen`：右侧新增**指南针 FAB**（针随地图朝向反向旋转指北；点按切换 heading-up，
+  高亮表示开启；无 Map ID 时提示 `rotateNeedsMapId`，不旋转）。Google Maps JS API 没有
+  内置“跟随设备罗盘自动旋转”，所以是用我们的 sensor heading 自己实现的。
+
+**2) 查看所有人按钮（fit bounds）**
+- `MapScreen` 新增 **fit-all FAB**：`fitAllSignal++` → `GoogleMapView` `fitBounds` framing
+  所有可见图钉，底部留 320px 给 sheet；同时把 `followMode` 切 `free`。
+
+**3) 创建房间页历史加入房间（本地，≤10）**
+- 新增 `lib/roomHistory.ts`：localStorage（`zhinzen.roomHistory.v1`），newest-first、去重、
+  上限 10。`getRoomHistory` / `addRoomToHistory` / `removeRoomFromHistory`。
+- `roomStore`：创建/加入成功后 `addRoomToHistory(roomId)`。
+- `RoomChoice`：底部「最近加入」列表，点条目直接重新加入（走 `joinRoom`），右侧垃圾桶移除。
+  时间显示 just now / Xm / Xh / Xd。
+
+**新增图标**：`compass` / `fitAll` / `trash`（`Icon.tsx`）。
+
+**验证**
+- `npm run build` 通过（主 bundle ~713KB，老 TODO：Firebase 代码拆分）。
+- **未重新部署**。注意：线上要让旋转生效，需先建 Map ID 填 `.env.local` 再 build + deploy。
+
+---
+
 ## 2026-06-03 — 首次部署到 Firebase（zhinzen）✅
 
 **已上线**
