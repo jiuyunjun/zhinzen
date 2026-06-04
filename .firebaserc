@@ -1,5 +1,15 @@
 {
   "projects": {
     "default": "zhinzen"
-  }
+  },
+  "targets": {
+    "zhinzen": {
+      "database": {
+        "live": [
+          "zhinzen-live"
+        ]
+      }
+    }
+  },
+  "etags": {}
 }

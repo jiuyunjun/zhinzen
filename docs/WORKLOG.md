@@ -5,6 +5,51 @@
 
 ---
 
+## 2026-06-03 — 首次部署到 Firebase（zhinzen）✅
+
+**已上线**
+- **Hosting**：https://zhinzen.web.app （HTTP 200，标题正确）。
+- **Firestore 规则**：部署成功（默认 (default) 库存在）。
+- **Functions**：`createRoom / joinRoom / appendTrackPoint` 此前已在线（本次 No changes），
+  `health` 更新成功（https://health-g5fakuj3oa-uc.a.run.app 返回 ok）。项目已是 Blaze。
+- **RTDB 规则**：见下方 workaround，已发布成功（status: ok）。
+
+**部署步骤（复现用）**
+1. `npm run build --workspace @zhinzen/web`（env 从根 `.env.local` 注入到打包产物）。
+2. `cd firebase/functions && npm install && npm run build`（根 firebase.json 的 functions 没有
+   predeploy hook，需手动 build 出 `lib/`）。
+3. `firebase deploy --only "hosting,firestore" --project zhinzen`（PowerShell 下 `--only` 列表
+   必须加引号）。
+4. `firebase deploy --only functions --project zhinzen`。
+
+**⚠️ RTDB 规则部署的坑（重要，handoff 必读）**
+- RTDB 实例是命名实例 `zhinzen-live`（asia-southeast1），项目**没有默认实例**
+  （`<project>-default-rtdb`）。firebase-tools 15.x 的已知 bug：即便用
+  `database.instance` 或 `target`，`firebase deploy --only database` 仍报
+  “haven't created a default Realtime Database instance”。`firebase target:apply database
+  live zhinzen-live` + firebase.json 用 `"target": "live"` 也没绕过。
+- **可行 workaround（本次采用）**：用 gcloud 取 token 后 REST PUT 规则：
+  ```
+  $token = gcloud auth print-access-token
+  Invoke-RestMethod -Method Put `
+    -Uri "https://zhinzen-live.asia-southeast1.firebasedatabase.app/.settings/rules.json" `
+    -Headers @{ Authorization = "Bearer $token" } `
+    -Body (Get-Content -Raw firebase/database.rules.json) -ContentType "application/json"
+  ```
+  （需要本机 gcloud 已登录有 cloud-platform scope 的账号。）
+- 以后改 RTDB 规则：要么用上面的 REST PUT，要么在控制台 Realtime Database → 规则 粘贴
+  `firebase/database.rules.json` 内容发布。`firebase.json` 现用 `database.target = "live"`
+  （target 已 apply 到 `.firebaserc`）。
+
+**下一步**
+1. 真机打开 https://zhinzen.web.app 验证：定位权限、创建/加入房间、成员实时位置、改名、
+   方向指针、track 取景。
+2. **Maps key 限制**（仍未确认）：GCP 控制台给 key 加 HTTP 引荐来源（`zhinzen.web.app/*`、
+   `localhost:5173/*`）+ 限制为 Maps JavaScript API。否则线上域名可能因未授权无法加载地图。
+3. 主 bundle ~712KB：做 Firebase 代码拆分（manualChunks / 动态 import）。
+
+---
+
 ## 2026-06-03 — Phase 4 收尾 + 地图/改名体验改进 ✅
 
 **Phase 4 收尾（方向指针平滑）**

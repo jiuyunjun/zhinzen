@@ -5,7 +5,7 @@
   },
   "database": [
     {
-      "instance": "zhinzen-live",
+      "target": "live",
       "rules": "firebase/database.rules.json"
     }
   ],
