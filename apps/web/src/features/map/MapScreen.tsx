@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { TrackPoint } from '@zhinzen/shared-types';
 import { color as tokens, font, mapThemes } from '@zhinzen/shared-ui';
 import { useDeviceStore } from '../../state/deviceStore';
@@ -50,7 +50,17 @@ export function MapScreen({ onLeave }: { onLeave: () => void }) {
   const [mapHeading, setMapHeading] = useState(0);
   const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
   const [trackPoints, setTrackPoints] = useState<TrackPoint[]>([]);
+  // Continuous (unwrapped) map heading so the compass needle takes the short way
+  // across north instead of spinning ~360° when getHeading() wraps 359°→0°.
+  const headingAccum = useRef({ prevRaw: 0, continuous: 0 });
   const { msg, flash } = useToast();
+
+  const onMapHeadingChange = (raw: number) => {
+    const acc = headingAccum.current;
+    acc.continuous += shortestAngleDelta(raw, acc.prevRaw);
+    acc.prevRaw = raw;
+    setMapHeading(acc.continuous);
+  };
 
   const selfMemberLocation = members.find((member) => member.isSelf)?.location ?? null;
   const effectiveOwnLocation = ownLocation ?? selfMemberLocation;
@@ -238,7 +248,7 @@ export function MapScreen({ onLeave }: { onLeave: () => void }) {
         trackPoints={trackPoints}
         onSelectMember={onSelectMember}
         onUserPan={() => setFollowMode('free')}
-        onHeadingChange={setMapHeading}
+        onHeadingChange={onMapHeadingChange}
       />
 
       {/* top status bar */}
@@ -389,6 +399,11 @@ export function MapScreen({ onLeave }: { onLeave: () => void }) {
       <Toast msg={msg} />
     </div>
   );
+}
+
+/** Shortest signed angular distance from `current` to `target`, in (-180, 180]. */
+function shortestAngleDelta(target: number, current: number): number {
+  return ((target - current + 540) % 360) - 180;
 }
 
 function Fab({
