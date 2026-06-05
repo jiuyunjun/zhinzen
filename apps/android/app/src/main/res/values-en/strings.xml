@@ -33,4 +33,9 @@
     <string name="nav_stale_hint">This location may be outdated — navigating to the last known spot.</string>
     <string name="sharing_notification">Sharing your location</string>
     <string name="sharing_channel">Location sharing</string>
+    <string name="nearby_label">Bluetooth: %1$s</string>
+    <string name="nearby_very_near">Very near</string>
+    <string name="nearby_near">Near</string>
+    <string name="nearby_far">Far</string>
+    <string name="nearby_weak">Weak signal</string>
 </resources>

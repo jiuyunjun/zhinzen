@@ -5,7 +5,7 @@ import {
   calculateRelativeDirection,
   formatDistance,
 } from '@zhinzen/geo-utils';
-import type { LiveLocation } from '@zhinzen/shared-types';
+import type { DeviceCapabilities, LiveLocation } from '@zhinzen/shared-types';
 import { color as tokens, font, withAlpha } from '@zhinzen/shared-ui';
 
 import { Icon } from '../../components/Icon';
@@ -284,6 +284,8 @@ function OtherPanel({
         />
       </div>
 
+      <CapabilityChips capabilities={member.member.capabilities} />
+
       {showMovedHint && (
         <div style={{ marginTop: 10, color: tokens.stale, fontSize: 12.5, lineHeight: 1.35 }}>
           {t('staleNavigationHint')}
@@ -323,6 +325,39 @@ function OtherPanel({
         {t('navigate')}
       </button>
     </section>
+  );
+}
+
+/** UWB / Bluetooth / compass capability chips (App members report real caps). */
+function CapabilityChips({ capabilities }: { capabilities: DeviceCapabilities }) {
+  const t = useUiStore((s) => s.t);
+  const chips: Array<{ label: string; color: string }> = [];
+  if (capabilities.uwb) chips.push({ label: t('uwbReady'), color: tokens.target });
+  else if (capabilities.ble) chips.push({ label: t('bleRange'), color: tokens.self });
+  if (!capabilities.compass) chips.push({ label: t('compassOff'), color: tokens.inkSoft });
+  if (chips.length === 0) return null;
+  return (
+    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 10 }}>
+      {chips.map((c) => (
+        <span
+          key={c.label}
+          style={{
+            height: 26,
+            padding: '0 10px',
+            display: 'inline-flex',
+            alignItems: 'center',
+            borderRadius: 9,
+            background: withAlpha(c.color, 0.12),
+            color: c.color,
+            fontFamily: font.mono,
+            fontSize: 12.5,
+            fontWeight: 600,
+          }}
+        >
+          {c.label}
+        </span>
+      ))}
+    </div>
   );
 }
 

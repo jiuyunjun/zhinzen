@@ -26,6 +26,7 @@ import com.lazydoglab.zhinzen.data.deriveStatus
 import com.lazydoglab.zhinzen.device.DeviceIdentity
 import com.lazydoglab.zhinzen.device.DeviceIdentityStore
 import com.lazydoglab.zhinzen.location.LocationController
+import com.lazydoglab.zhinzen.nearby.BleRangingController
 import com.lazydoglab.zhinzen.sensor.CompassController
 import com.lazydoglab.zhinzen.service.LocationSharingService
 import com.lazydoglab.zhinzen.util.DeviceCapabilities
@@ -48,6 +49,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val roomHistoryStore = RoomHistory(application)
     private val haptics = Haptics(application)
     private val capabilities = DeviceCapabilities.detect(application)
+    private val bleController = BleRangingController(application)
 
     val deviceId: String = identity.deviceId
 
@@ -77,6 +79,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         private set
     /** Recent track points of the currently selected (other) member. */
     var trackPoints by mutableStateOf<List<TrackPoint>>(emptyList())
+        private set
+    /** Latest BLE RSSI per nearby member deviceId (for coarse proximity). */
+    var nearbyRssi by mutableStateOf<Map<String, Int>>(emptyMap())
         private set
 
     val members: SnapshotStateList<MemberView> = mutableStateListOf()
@@ -120,10 +125,29 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         if (deviceId != null && deviceId != this.deviceId) {
             haptics.light()
             fetchTrack(deviceId)
+            startNearby()
         } else {
             trackPoints = emptyList()
+            stopNearby()
         }
         updateCompass()
+    }
+
+    private fun startNearby() {
+        if (!bleController.isSupported() || !bleController.hasPermission()) return
+        bleController.start(deviceId) { token, rssi ->
+            viewModelScope.launch {
+                val match = members.firstOrNull { !it.isSelf && BleRangingController.tokenInt(it.member.deviceId) == token }
+                if (match != null) {
+                    nearbyRssi = nearbyRssi + (match.member.deviceId to rssi)
+                }
+            }
+        }
+    }
+
+    private fun stopNearby() {
+        bleController.stop()
+        nearbyRssi = emptyMap()
     }
 
     fun toggleHeadingUp() {
@@ -211,6 +235,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         stopWatching()
         stopLocation()
         stopCompass()
+        stopNearby()
         roomId = null
         ownLocation = null
         selectedDeviceId = null
@@ -341,6 +366,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         stopWatching()
         stopLocation()
         stopCompass()
+        stopNearby()
         super.onCleared()
     }
 }

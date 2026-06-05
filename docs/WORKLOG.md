@@ -5,6 +5,30 @@
 
 ---
 
+## 2026-06-05 — 网页能力标签 + 安卓 BLE 近距离测距（web 已部署 / android 已编译）✅
+
+**1) 网页不显示 UWB/蓝牙能力 → 修了**
+- 之前重写网页 `MemberDetailPanel` 时丢了能力标签。重新加上 `CapabilityChips`：成员
+  `capabilities.uwb` → 「UWB 可用」、否则 `ble` → 「蓝牙」、`!compass` → 「无方向传感器」。
+  网页成员本身 uwb/ble=false（浏览器限制,符合设计）,仅 App 成员会显示。新增 i18n
+  `uwbReady/bleRange/compassOff`。**已部署**。
+
+**2) 安卓 BLE 近距离测距（design §5.8）**
+- 新增 `nearby/BleRangingController`：广播 manufacturer data(company 0xFFFF + deviceId 的
+  SHA-256 前 4 字节 token)+ 扫描同类广播,RSSI → 粗略距离桶（很近/较近/较远/信号弱,
+  **不报精确米数**）。token 让扫描方把广播匹配到房间成员 deviceId。
+- 权限：manifest 加 `BLUETOOTH_SCAN/ADVERTISE/CONNECT`(31+) + 旧版 `BLUETOOTH(_ADMIN)`(≤30);
+  地图权限请求里一并申请(31+)。
+- VM：选中他人时 `startNearby()`(BLE 支持且授权才启),扫描回调把 token→deviceId 映射、
+  更新 `nearbyRssi`;取消选择/离开 `stopNearby()`。成员详情显示「蓝牙距离：很近」等。
+- UWB 精准测距仍**未实现**(androidx.core.uwb alpha + 仅少数机型 + 需 OOB 协商),
+  能力检测已做;计划见 `design.md §8.4`。
+
+**验证**：android `assembleDebug` ✅;web `build` ✅ 并**已部署**。
+⚠️ BLE 测距需**两台真机**验证(广播/扫描/RSSI 因机型差异大,桶阈值可能要调)。
+
+---
+
 ## 2026-06-05 — 修复：在线状态用 RTDB onDisconnect + 通知图标（web 已部署）✅
 
 **问题**

@@ -77,6 +77,8 @@ import com.lazydoglab.zhinzen.data.LiveLocation
 import com.lazydoglab.zhinzen.data.MemberStatus
 import com.lazydoglab.zhinzen.data.MemberView
 import com.lazydoglab.zhinzen.data.RoomCode
+import com.lazydoglab.zhinzen.nearby.BleRangingController
+import com.lazydoglab.zhinzen.nearby.NearbyProximity
 import com.lazydoglab.zhinzen.data.TrackPoint
 import com.lazydoglab.zhinzen.ui.theme.ZzColor
 
@@ -91,6 +93,7 @@ fun MapScreen(
     sharing: Boolean,
     trackPoints: List<TrackPoint>,
     headingUp: Boolean,
+    nearbyRssi: Map<String, Int>,
     onLeave: () -> Unit,
     onPermissionGranted: () -> Unit,
     onSelectMember: (String?) -> Unit,
@@ -107,6 +110,12 @@ fun MapScreen(
                 // Notification permission so the background-sharing notification shows.
                 if (android.os.Build.VERSION.SDK_INT >= 33) {
                     add(android.Manifest.permission.POST_NOTIFICATIONS)
+                }
+                // BLE near-distance (Android 12+ runtime permissions).
+                if (android.os.Build.VERSION.SDK_INT >= 31) {
+                    add(android.Manifest.permission.BLUETOOTH_SCAN)
+                    add(android.Manifest.permission.BLUETOOTH_ADVERTISE)
+                    add(android.Manifest.permission.BLUETOOTH_CONNECT)
                 }
             },
         )
@@ -316,6 +325,7 @@ fun MapScreen(
                     member = selected,
                     selfLocation = selfLocation,
                     deviceHeading = deviceHeading,
+                    rssi = nearbyRssi[selected.member.deviceId],
                     onClose = { onSelectMember(null) },
                     onRename = onRename,
                     onLeave = onLeave,
@@ -363,6 +373,7 @@ private fun MemberDetail(
     member: MemberView,
     selfLocation: LiveLocation?,
     deviceHeading: Float?,
+    rssi: Int?,
     onClose: () -> Unit,
     onRename: (String) -> Unit,
     onLeave: () -> Unit,
@@ -397,7 +408,7 @@ private fun MemberDetail(
     if (member.isSelf) {
         SelfEditor(member, onRename, onLeave)
     } else {
-        OtherDetail(member, selfLocation, deviceHeading)
+        OtherDetail(member, selfLocation, deviceHeading, rssi)
     }
 }
 
@@ -434,7 +445,7 @@ private fun SelfEditor(member: MemberView, onRename: (String) -> Unit, onLeave: 
 }
 
 @Composable
-private fun OtherDetail(member: MemberView, selfLocation: LiveLocation?, deviceHeading: Float?) {
+private fun OtherDetail(member: MemberView, selfLocation: LiveLocation?, deviceHeading: Float?, rssi: Int?) {
     val context = LocalContext.current
     val haptic = LocalHapticFeedback.current
     val location = member.location
@@ -494,6 +505,23 @@ private fun OtherDetail(member: MemberView, selfLocation: LiveLocation?, deviceH
             text = stringResource(R.string.nav_stale_hint),
             color = ZzColor.Stale,
             fontSize = 12.sp,
+            modifier = Modifier.padding(top = 8.dp),
+        )
+    }
+
+    if (rssi != null) {
+        val proximityRes =
+            when (BleRangingController.proximityForRssi(rssi)) {
+                NearbyProximity.VERY_NEAR -> R.string.nearby_very_near
+                NearbyProximity.NEAR -> R.string.nearby_near
+                NearbyProximity.FAR -> R.string.nearby_far
+                NearbyProximity.WEAK -> R.string.nearby_weak
+            }
+        Text(
+            text = stringResource(R.string.nearby_label, stringResource(proximityRes)),
+            color = ZzColor.Self,
+            fontSize = 12.5.sp,
+            fontWeight = FontWeight.SemiBold,
             modifier = Modifier.padding(top = 8.dp),
         )
     }

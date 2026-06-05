@@ -53,6 +53,7 @@ fun ZhinzenApp(viewModel: AppViewModel = viewModel()) {
                         sharing = viewModel.sharing,
                         trackPoints = viewModel.trackPoints,
                         headingUp = viewModel.headingUp,
+                        nearbyRssi = viewModel.nearbyRssi,
                         onLeave = viewModel::leaveRoom,
                         onPermissionGranted = viewModel::onLocationPermissionGranted,
                         onSelectMember = viewModel::selectMember,

@@ -34,4 +34,9 @@
     <string name="nav_stale_hint">位置可能已过期，将导航到最后已知位置。</string>
     <string name="sharing_notification">正在共享你的位置</string>
     <string name="sharing_channel">位置共享</string>
+    <string name="nearby_label">蓝牙距离：%1$s</string>
+    <string name="nearby_very_near">很近</string>
+    <string name="nearby_near">较近</string>
+    <string name="nearby_far">较远</string>
+    <string name="nearby_weak">信号弱</string>
 </resources>
