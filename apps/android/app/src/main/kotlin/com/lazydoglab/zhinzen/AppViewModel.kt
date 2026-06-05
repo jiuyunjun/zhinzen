@@ -175,7 +175,25 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     /** Called by the map screen once location permission is granted. */
     fun onLocationPermissionGranted() {
-        if (roomId != null) startLocation()
+        if (roomId != null && sharing) startLocation()
+    }
+
+    /** Pause/resume sharing this device's live location. */
+    fun updateSharing(on: Boolean) {
+        if (sharing == on) return
+        sharing = on
+        if (on) {
+            if (locationController.hasPermission()) startLocation()
+        } else {
+            stopLocation()
+            val rid = roomId
+            val loc = ownLocation
+            if (rid != null && loc != null) {
+                val paused = loc.copy(sharingLocation = false, updatedAt = System.currentTimeMillis())
+                ownLocation = paused
+                Backend.database.getReference("liveLocations/$rid/$deviceId").setValue(paused)
+            }
+        }
     }
 
     fun clearError() {

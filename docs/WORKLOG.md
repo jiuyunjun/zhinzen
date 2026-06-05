@@ -5,6 +5,23 @@
 
 ---
 
+## 2026-06-05 — Android：共享开关 + 查看所有人 + track 取景 ✅（已编译）
+
+**做了什么**
+- **共享开关**：右侧悬浮按钮 ⏸/▶。`AppViewModel.updateSharing(on)` 暂停时停止定位采集并把
+  RTDB 实时位置写成 `sharingLocation=false`（别人看到「未共享」），恢复时重新开始上传。
+- **查看所有人**：⤢ 悬浮按钮 → `fitBounds` 把所有有位置的成员框进视野。
+- **track 取景**：选中他人时 `LaunchedEffect(selectedDeviceId)` 自动把相机取景到「我 + 目标」。
+- 头像右下角小圆点 = 成员状态（在线/过期/离线·未共享），与底部成员条/网页一致（保留）。
+
+**验证**：`./gradlew assembleDebug` BUILD SUCCESSFUL（修了一个 `setSharing` 与 `var sharing`
+生成 setter 的命名冲突 → 改 `updateSharing`）。仅编译验证。
+
+**未做**：地图旋转/指南针按钮、轨迹上传/显示、过期可导航的「对方可能已移动」提示、
+FAB 图标目前用 unicode 字形（⏸/▶/⤢），后续可换矢量图标。
+
+---
+
 ## 2026-06-05 — Android：头像图钉 + 罗盘方向指针 ✅（已编译）
 
 **做了什么**

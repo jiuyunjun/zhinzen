@@ -34,7 +34,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -49,8 +51,10 @@ import androidx.compose.ui.unit.sp
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.isGranted
 import com.google.accompanist.permissions.rememberMultiplePermissionsState
+import com.google.android.gms.maps.CameraUpdateFactory
 import com.google.android.gms.maps.model.CameraPosition
 import com.google.android.gms.maps.model.LatLng
+import com.google.android.gms.maps.model.LatLngBounds
 import com.google.maps.android.compose.GoogleMap
 import com.google.maps.android.compose.MapProperties
 import com.google.maps.android.compose.MapUiSettings
@@ -74,10 +78,12 @@ fun MapScreen(
     ownLocation: LiveLocation?,
     selectedDeviceId: String?,
     deviceHeading: Float?,
+    sharing: Boolean,
     onLeave: () -> Unit,
     onPermissionGranted: () -> Unit,
     onSelectMember: (String?) -> Unit,
     onRename: (String) -> Unit,
+    onToggleSharing: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val permissions =
@@ -107,6 +113,18 @@ fun MapScreen(
 
     val selfLocation = ownLocation ?: members.firstOrNull { it.isSelf }?.location
     val selected = members.firstOrNull { it.member.deviceId == selectedDeviceId }
+    val scope = rememberCoroutineScope()
+
+    // Track mode: when an other member is selected, frame self + target once.
+    LaunchedEffect(selectedDeviceId) {
+        val target = selected?.takeIf { !it.isSelf }?.location ?: return@LaunchedEffect
+        val self = selfLocation ?: return@LaunchedEffect
+        val bounds = LatLngBounds.builder()
+            .include(LatLng(self.lat, self.lng))
+            .include(LatLng(target.lat, target.lng))
+            .build()
+        runCatching { cameraPositionState.animate(CameraUpdateFactory.newLatLngBounds(bounds, 200)) }
+    }
 
     Box(modifier = modifier.fillMaxSize()) {
         GoogleMap(
@@ -180,6 +198,33 @@ fun MapScreen(
                     Text(stringResource(R.string.grant_location))
                 }
             }
+        }
+
+        // right-side floating actions: sharing toggle + fit everyone
+        Column(
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .padding(end = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            FabGlyph(glyph = if (sharing) "⏸" else "▶", active = !sharing, onClick = onToggleSharing)
+            FabGlyph(
+                glyph = "⤢",
+                onClick = {
+                    val pins = members.mapNotNull { it.location }
+                    if (pins.isNotEmpty()) {
+                        val builder = LatLngBounds.builder()
+                        pins.forEach { builder.include(LatLng(it.lat, it.lng)) }
+                        scope.launch {
+                            runCatching {
+                                cameraPositionState.animate(
+                                    CameraUpdateFactory.newLatLngBounds(builder.build(), 160),
+                                )
+                            }
+                        }
+                    }
+                },
+            )
         }
 
         // bottom sheet: member strip or selected member detail
@@ -407,6 +452,20 @@ private fun Avatar(mv: MemberView) {
                 .clip(CircleShape)
                 .background(statusColor(mv.status)),
         )
+    }
+}
+
+@Composable
+private fun FabGlyph(glyph: String, active: Boolean = false, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .size(46.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(if (active) ZzColor.Self else Color(0xF2FFFFFF))
+            .clickable { onClick() },
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(text = glyph, color = if (active) Color.White else ZzColor.Ink, fontSize = 18.sp)
     }
 }
 

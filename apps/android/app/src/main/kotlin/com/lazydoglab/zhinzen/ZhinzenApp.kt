@@ -43,10 +43,12 @@ fun ZhinzenApp(viewModel: AppViewModel = viewModel()) {
                         ownLocation = viewModel.ownLocation,
                         selectedDeviceId = viewModel.selectedDeviceId,
                         deviceHeading = viewModel.deviceHeading,
+                        sharing = viewModel.sharing,
                         onLeave = viewModel::leaveRoom,
                         onPermissionGranted = viewModel::onLocationPermissionGranted,
                         onSelectMember = viewModel::selectMember,
                         onRename = viewModel::renameInRoom,
+                        onToggleSharing = { viewModel.updateSharing(!viewModel.sharing) },
                     )
             }
         }
