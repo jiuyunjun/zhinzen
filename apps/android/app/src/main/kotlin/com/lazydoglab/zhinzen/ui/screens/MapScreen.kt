@@ -627,7 +627,7 @@ private fun OtherDetail(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            TrendBadge(estimate.trend)
+            NearbyDirection(estimate.bestHeadingDeg, deviceHeading, estimate.trend)
             Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 Text(
                     text = stringResource(rangeRes(estimate.distanceMeters)),
@@ -641,6 +641,13 @@ private fun OtherDetail(
                         text = "${estimate.rssi} dBm · ${stringResource(trendRes)}",
                         color = ZzColor.InkSoft,
                         fontSize = 12.sp,
+                    )
+                }
+                if (estimate.bestHeadingDeg == null) {
+                    Text(
+                        text = stringResource(R.string.nearby_dir_unknown),
+                        color = ZzColor.InkFaint,
+                        fontSize = 11.5.sp,
                     )
                 }
             }
@@ -689,23 +696,54 @@ private fun UwbArrow(azimuthDeg: Float?) {
     }
 }
 
-/** Warmer/colder badge from the BLE RSSI trend (reliable; true direction needs UWB). */
+/**
+ * BLE near-distance badge. When a strongest-signal heading has been estimated
+ * (detrended RSSI vs facing direction) it shows an arrow toward the peer relative
+ * to the device; otherwise it falls back to a warmer/colder trend glyph. Rough
+ * hint only — precise bearing comes from UWB.
+ */
 @Composable
-private fun TrendBadge(trend: NearbyTrend) {
-    val (glyph, tint) =
-        when (trend) {
-            NearbyTrend.CLOSER -> "↑" to ZzColor.Online
-            NearbyTrend.FARTHER -> "↓" to ZzColor.Stale
-            NearbyTrend.STEADY -> "•" to ZzColor.InkFaint
+private fun NearbyDirection(bestHeadingDeg: Float?, deviceHeading: Float?, trend: NearbyTrend) {
+    val relative =
+        if (bestHeadingDeg != null && deviceHeading != null) {
+            ((bestHeadingDeg - deviceHeading + 360f) % 360f)
+        } else {
+            null
         }
     Box(
         modifier = Modifier
             .size(56.dp)
             .clip(CircleShape)
-            .background(tint.copy(alpha = 0.14f)),
+            .background(ZzColor.Self.copy(alpha = 0.14f)),
         contentAlignment = Alignment.Center,
     ) {
-        Text(text = glyph, color = tint, fontSize = 26.sp, fontWeight = FontWeight.Bold)
+        if (relative != null) {
+            var continuous by remember { mutableStateOf(relative) }
+            LaunchedEffect(relative) {
+                continuous += ((relative - (continuous % 360f) + 540f) % 360f) - 180f
+            }
+            val angle by animateFloatAsState(targetValue = continuous, label = "nearbyDir")
+            Canvas(modifier = Modifier.size(26.dp).rotate(angle)) {
+                val w = size.width
+                val h = size.height
+                val path = Path().apply {
+                    moveTo(w / 2f, 0f)
+                    lineTo(w * 0.82f, h)
+                    lineTo(w / 2f, h * 0.66f)
+                    lineTo(w * 0.18f, h)
+                    close()
+                }
+                drawPath(path, ZzColor.Self)
+            }
+        } else {
+            val (glyph, tint) =
+                when (trend) {
+                    NearbyTrend.CLOSER -> "↑" to ZzColor.Online
+                    NearbyTrend.FARTHER -> "↓" to ZzColor.Stale
+                    NearbyTrend.STEADY -> "•" to ZzColor.InkFaint
+                }
+            Text(text = glyph, color = tint, fontSize = 26.sp, fontWeight = FontWeight.Bold)
+        }
     }
 }
 

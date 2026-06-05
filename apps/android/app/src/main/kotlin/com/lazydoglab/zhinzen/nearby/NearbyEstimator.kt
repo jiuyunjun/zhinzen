@@ -24,24 +24,34 @@ data class NearbyEstimate(
 /**
  * Fuses BLE RSSI + the device compass to guide "find each other" indoors.
  *
- * A single phone cannot derive bearing-to-peer from BLE alone (no antenna array),
- * so direction is estimated heuristically: we bucket smoothed RSSI by the heading
- * the user was facing, and report the heading with the strongest signal. The user
- * turning/walking is what makes this converge — like a warmer/colder compass.
+ * A single phone has no antenna array, so absolute bearing isn't directly
+ * measurable. We approximate it by exploiting body shadowing: 2.4 GHz is absorbed
+ * by your body, so when you face the peer (phone between you and them) the signal
+ * is relatively stronger than when you face away. The naive version is confounded
+ * by distance changing as you move, so we DETREND first: subtract a slow RSSI
+ * baseline (the distance component) and bucket only the residual by heading. The
+ * heading with the highest residual ≈ the direction to the peer. Converges as the
+ * user turns/walks; treat it as a rough hint, not a precise pointer (UWB is that).
  */
 class NearbyEstimator {
     private var smoothed = Double.NaN
+    private var baseline = Double.NaN
     private val history = ArrayDeque<Pair<Long, Double>>()
     private val headingBuckets = DoubleArray(BUCKETS) { Double.NaN }
 
     fun reset() {
         smoothed = Double.NaN
+        baseline = Double.NaN
         history.clear()
         for (i in headingBuckets.indices) headingBuckets[i] = Double.NaN
     }
 
     fun onSample(rssi: Int, headingDeg: Float?, nowMs: Long): NearbyEstimate {
         smoothed = if (smoothed.isNaN()) rssi.toDouble() else smoothed + SMOOTH_ALPHA * (rssi - smoothed)
+        // Slow baseline tracks the distance-driven RSSI level; the residual is what's
+        // left over (mostly heading-dependent body shadowing).
+        baseline = if (baseline.isNaN()) smoothed else baseline + BASELINE_ALPHA * (smoothed - baseline)
+        val residual = smoothed - baseline
 
         history.addLast(nowMs to smoothed)
         while (history.isNotEmpty() && nowMs - history.first().first > HISTORY_MS) history.removeFirst()
@@ -49,7 +59,7 @@ class NearbyEstimator {
         if (headingDeg != null) {
             val b = (((headingDeg / (360f / BUCKETS)).toInt() % BUCKETS) + BUCKETS) % BUCKETS
             headingBuckets[b] =
-                if (headingBuckets[b].isNaN()) smoothed else headingBuckets[b] + BUCKET_ALPHA * (smoothed - headingBuckets[b])
+                if (headingBuckets[b].isNaN()) residual else headingBuckets[b] + BUCKET_ALPHA * (residual - headingBuckets[b])
         }
 
         return NearbyEstimate(
@@ -73,10 +83,12 @@ class NearbyEstimator {
     }
 
     private fun bestHeading(): Float? {
+        // Need decent angular coverage (user has turned/walked) before trusting it.
         val present = headingBuckets.withIndex().filter { !it.value.isNaN() }
-        if (present.size < 3) return null
+        if (present.size < 4) return null
         val best = present.maxBy { it.value }
         val mean = present.map { it.value }.average()
+        // The strongest direction must stand out from the average residual.
         if (best.value - mean < BEST_HEADING_MARGIN) return null
         return best.index * (360f / BUCKETS) + (360f / BUCKETS) / 2f
     }
@@ -84,10 +96,11 @@ class NearbyEstimator {
     companion object {
         private const val BUCKETS = 8
         private const val SMOOTH_ALPHA = 0.25
+        private const val BASELINE_ALPHA = 0.05 // slow: tracks distance, not heading
         private const val BUCKET_ALPHA = 0.3
         private const val HISTORY_MS = 6_000L
         private const val TREND_DELTA = 2.0 // dB
-        private const val BEST_HEADING_MARGIN = 3.0 // dB above the mean
+        private const val BEST_HEADING_MARGIN = 1.5 // dB of residual above the mean
         private const val TX_POWER_AT_1M = -59.0
         private const val PATH_LOSS_N = 2.5 // indoor
 
