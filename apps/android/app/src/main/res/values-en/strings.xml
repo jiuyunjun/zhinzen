@@ -34,6 +34,7 @@
     <string name="sharing_notification">Sharing your location</string>
     <string name="sharing_channel">Location sharing</string>
     <string name="nearby_label">Bluetooth: %1$s</string>
+    <string name="nearby_detail">Bluetooth · %1$s · %2$d dBm</string>
     <string name="nearby_very_near">Very near</string>
     <string name="nearby_near">Near</string>
     <string name="nearby_far">Far</string>

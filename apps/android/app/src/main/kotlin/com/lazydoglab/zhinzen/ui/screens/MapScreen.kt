@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -195,7 +196,9 @@ fun MapScreen(
             properties = MapProperties(isMyLocationEnabled = granted),
             uiSettings = MapUiSettings(
                 zoomControlsEnabled = false,
-                myLocationButtonEnabled = true,
+                // Hide the built-in top-right my-location button; we provide a recenter
+                // FAB in the right column to match the web layout.
+                myLocationButtonEnabled = false,
                 compassEnabled = false,
                 rotationGesturesEnabled = true,
                 tiltGesturesEnabled = true,
@@ -289,6 +292,22 @@ fun MapScreen(
                 active = headingUp,
                 rotationDeg = -cameraPositionState.position.bearing,
                 onClick = onToggleHeadingUp,
+            )
+            FabButton(
+                icon = FabIcon.Recenter,
+                onClick = {
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    val self = selfLocation
+                    if (self != null) {
+                        scope.launch {
+                            runCatching {
+                                cameraPositionState.animate(
+                                    CameraUpdateFactory.newLatLngZoom(LatLng(self.lat, self.lng), 16f),
+                                )
+                            }
+                        }
+                    }
+                },
             )
             FabButton(icon = if (sharing) FabIcon.Pause else FabIcon.Play, active = !sharing, onClick = onToggleSharing)
             FabButton(
@@ -526,13 +545,19 @@ private fun OtherDetail(
                 NearbyProximity.FAR -> R.string.nearby_far
                 NearbyProximity.WEAK -> R.string.nearby_weak
             }
-        Text(
-            text = stringResource(R.string.nearby_label, stringResource(proximityRes)),
-            color = ZzColor.Self,
-            fontSize = 12.5.sp,
-            fontWeight = FontWeight.SemiBold,
+        Row(
             modifier = Modifier.padding(top = 8.dp),
-        )
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            SignalBars(barsForRssi(rssi))
+            Text(
+                text = stringResource(R.string.nearby_detail, stringResource(proximityRes), rssi),
+                color = ZzColor.Self,
+                fontSize = 12.5.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
     } else if (nearbyScanning) {
         Text(
             text = stringResource(R.string.nearby_searching),
@@ -597,10 +622,34 @@ private fun Avatar(mv: MemberView) {
     }
 }
 
-private enum class FabIcon { Pause, Play, FitAll, Compass }
+private enum class FabIcon { Pause, Play, FitAll, Compass, Recenter }
 
 /** Floating action button matching the web's rounded-16 glass FABs, with a
  *  Canvas-drawn icon (geometric, like the web icon set). */
+/** 4-bar signal strength meter for BLE RSSI. */
+@Composable
+private fun SignalBars(level: Int) {
+    Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+        listOf(6, 9, 12, 15).forEachIndexed { index, barHeight ->
+            Box(
+                modifier = Modifier
+                    .width(3.dp)
+                    .height(barHeight.dp)
+                    .clip(RoundedCornerShape(1.dp))
+                    .background(if (index < level) ZzColor.Self else ZzColor.Self.copy(alpha = 0.22f)),
+            )
+        }
+    }
+}
+
+private fun barsForRssi(rssi: Int): Int =
+    when {
+        rssi >= -55 -> 4
+        rssi >= -67 -> 3
+        rssi >= -78 -> 2
+        else -> 1
+    }
+
 @Composable
 private fun FabButton(
     icon: FabIcon,
@@ -624,9 +673,25 @@ private fun FabButton(
                 FabIcon.Play -> drawPlayIcon(tint)
                 FabIcon.FitAll -> drawFitAllIcon(tint)
                 FabIcon.Compass -> drawCompassIcon(tint)
+                FabIcon.Recenter -> drawRecenterIcon(tint)
             }
         }
     }
+}
+
+private fun DrawScope.drawRecenterIcon(color: Color) {
+    val w = size.width
+    val h = size.height
+    val cx = w / 2f
+    val cy = h / 2f
+    val sw = w * 0.09f
+    drawCircle(color = color, radius = w * 0.26f, center = Offset(cx, cy), style = androidx.compose.ui.graphics.drawscope.Stroke(width = sw))
+    drawCircle(color = color, radius = w * 0.07f, center = Offset(cx, cy))
+    // crosshair ticks N/S/E/W
+    drawLine(color, Offset(cx, h * 0.06f), Offset(cx, h * 0.2f), sw, StrokeCap.Round)
+    drawLine(color, Offset(cx, h * 0.8f), Offset(cx, h * 0.94f), sw, StrokeCap.Round)
+    drawLine(color, Offset(w * 0.06f, cy), Offset(w * 0.2f, cy), sw, StrokeCap.Round)
+    drawLine(color, Offset(w * 0.8f, cy), Offset(w * 0.94f, cy), sw, StrokeCap.Round)
 }
 
 private fun DrawScope.drawCompassIcon(color: Color) {
