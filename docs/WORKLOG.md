@@ -5,6 +5,24 @@
 
 ---
 
+## 2026-06-05 — Android：地图旋转 + 指南针/heading-up ✅（已编译）
+
+**做了什么**
+- 开启地图旋转/倾斜手势（`MapUiSettings(rotationGesturesEnabled=true, tiltGesturesEnabled=true)`），
+  关掉内置指南针（用自绘 FAB 代替）。
+- 右侧新增**指南针 FAB**（自绘北向指针，旋转 `-相机bearing` 始终指北）：
+  - `AppViewModel.headingUp` + `toggleHeadingUp`；点开 → 罗盘运行、地图 bearing 跟随设备朝向
+    (`LaunchedEffect(headingUp, deviceHeading)` 设相机 bearing)；关闭 → 动画回正北。
+  - 罗盘运行条件统一为 `updateCompass()`：heading-up 开 或 选中他人 时运行。
+- 安卓 Maps SDK 原生支持旋转（不像 Web JS 需要 vector Map ID），所以这块不依赖额外配置。
+
+**验证**：`./gradlew assembleDebug` BUILD SUCCESSFUL。仅编译验证；旋转/罗盘需真机。
+
+**Android 现状**：已基本覆盖 web Phase 2–4 全部功能。剩余多为真机调优
+（罗盘抖动、轨迹抽稀、heading-up 跟随平滑度）。
+
+---
+
 ## 2026-06-05 — Android：进房 loading + 轨迹上传/显示 ✅（已编译）
 
 **进房间慢 → loading + 预热**

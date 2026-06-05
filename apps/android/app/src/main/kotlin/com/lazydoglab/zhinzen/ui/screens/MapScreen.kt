@@ -88,11 +88,13 @@ fun MapScreen(
     deviceHeading: Float?,
     sharing: Boolean,
     trackPoints: List<TrackPoint>,
+    headingUp: Boolean,
     onLeave: () -> Unit,
     onPermissionGranted: () -> Unit,
     onSelectMember: (String?) -> Unit,
     onRename: (String) -> Unit,
     onToggleSharing: () -> Unit,
+    onToggleHeadingUp: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val permissions =
@@ -124,6 +126,28 @@ fun MapScreen(
     val selected = members.firstOrNull { it.member.deviceId == selectedDeviceId }
     val scope = rememberCoroutineScope()
 
+    // Heading-up: rotate the map to follow the device compass; reset to north off.
+    LaunchedEffect(headingUp, deviceHeading) {
+        if (headingUp && deviceHeading != null) {
+            val pos = cameraPositionState.position
+            cameraPositionState.position = CameraPosition.Builder()
+                .target(pos.target).zoom(pos.zoom).tilt(pos.tilt).bearing(deviceHeading).build()
+        }
+    }
+    LaunchedEffect(headingUp) {
+        if (!headingUp && cameraPositionState.position.bearing != 0f) {
+            val pos = cameraPositionState.position
+            runCatching {
+                cameraPositionState.animate(
+                    CameraUpdateFactory.newCameraPosition(
+                        CameraPosition.Builder()
+                            .target(pos.target).zoom(pos.zoom).tilt(pos.tilt).bearing(0f).build(),
+                    ),
+                )
+            }
+        }
+    }
+
     // Track mode: when an other member is selected, frame self + target once.
     LaunchedEffect(selectedDeviceId) {
         val target = selected?.takeIf { !it.isSelf }?.location ?: return@LaunchedEffect
@@ -140,7 +164,13 @@ fun MapScreen(
             modifier = Modifier.fillMaxSize(),
             cameraPositionState = cameraPositionState,
             properties = MapProperties(isMyLocationEnabled = granted),
-            uiSettings = MapUiSettings(zoomControlsEnabled = false, myLocationButtonEnabled = true),
+            uiSettings = MapUiSettings(
+                zoomControlsEnabled = false,
+                myLocationButtonEnabled = true,
+                compassEnabled = false,
+                rotationGesturesEnabled = true,
+                tiltGesturesEnabled = true,
+            ),
             // Keep the Google logo + controls inside the system bars (edge-to-edge).
             contentPadding = WindowInsets.systemBars.asPaddingValues(),
         ) {
@@ -228,6 +258,12 @@ fun MapScreen(
                 .padding(end = 12.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
+            FabButton(
+                icon = FabIcon.Compass,
+                active = headingUp,
+                rotationDeg = -cameraPositionState.position.bearing,
+                onClick = onToggleHeadingUp,
+            )
             FabButton(icon = if (sharing) FabIcon.Pause else FabIcon.Play, active = !sharing, onClick = onToggleSharing)
             FabButton(
                 icon = FabIcon.FitAll,
@@ -498,12 +534,17 @@ private fun Avatar(mv: MemberView) {
     }
 }
 
-private enum class FabIcon { Pause, Play, FitAll }
+private enum class FabIcon { Pause, Play, FitAll, Compass }
 
 /** Floating action button matching the web's rounded-16 glass FABs, with a
  *  Canvas-drawn icon (geometric, like the web icon set). */
 @Composable
-private fun FabButton(icon: FabIcon, active: Boolean = false, onClick: () -> Unit) {
+private fun FabButton(
+    icon: FabIcon,
+    active: Boolean = false,
+    rotationDeg: Float = 0f,
+    onClick: () -> Unit,
+) {
     val tint = if (active) Color.White else ZzColor.Ink
     Box(
         modifier = Modifier
@@ -514,14 +555,30 @@ private fun FabButton(icon: FabIcon, active: Boolean = false, onClick: () -> Uni
             .clickable { onClick() },
         contentAlignment = Alignment.Center,
     ) {
-        Canvas(modifier = Modifier.size(22.dp)) {
+        Canvas(modifier = Modifier.size(22.dp).rotate(rotationDeg)) {
             when (icon) {
                 FabIcon.Pause -> drawPauseIcon(tint)
                 FabIcon.Play -> drawPlayIcon(tint)
                 FabIcon.FitAll -> drawFitAllIcon(tint)
+                FabIcon.Compass -> drawCompassIcon(tint)
             }
         }
     }
+}
+
+private fun DrawScope.drawCompassIcon(color: Color) {
+    val w = size.width
+    val h = size.height
+    // north pointer (arrowhead up) + tail
+    val needle = Path().apply {
+        moveTo(w / 2f, h * 0.1f)
+        lineTo(w * 0.68f, h * 0.5f)
+        lineTo(w / 2f, h * 0.4f)
+        lineTo(w * 0.32f, h * 0.5f)
+        close()
+    }
+    drawPath(needle, color)
+    drawLine(color, Offset(w / 2f, h * 0.46f), Offset(w / 2f, h * 0.9f), w * 0.07f, StrokeCap.Round)
 }
 
 private fun DrawScope.drawPauseIcon(color: Color) {

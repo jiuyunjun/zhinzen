@@ -66,6 +66,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     /** Device compass heading (degrees, 0 = north), or null if unavailable. */
     var deviceHeading by mutableStateOf<Float?>(null)
         private set
+    /** When true, the map rotates to follow the device compass (heading-up). */
+    var headingUp by mutableStateOf(false)
+        private set
     var roomHistory by mutableStateOf<List<RoomHistoryEntry>>(roomHistoryStore.list())
         private set
     /** Recent track points of the currently selected (other) member. */
@@ -112,14 +115,23 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     fun selectMember(deviceId: String?) {
         selectedDeviceId = deviceId
-        // Run the compass + load the track only while pointing at someone else.
         if (deviceId != null && deviceId != this.deviceId) {
-            startCompass()
             fetchTrack(deviceId)
         } else {
-            stopCompass()
             trackPoints = emptyList()
         }
+        updateCompass()
+    }
+
+    fun toggleHeadingUp() {
+        headingUp = !headingUp
+        updateCompass()
+    }
+
+    /** The compass runs while in heading-up mode or while pointing at another member. */
+    private fun updateCompass() {
+        val wanted = headingUp || (selectedDeviceId != null && selectedDeviceId != deviceId)
+        if (wanted) startCompass() else stopCompass()
     }
 
     private fun fetchTrack(targetDeviceId: String) {
@@ -183,6 +195,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun leaveRoom() {
+        headingUp = false
         stopWatching()
         stopLocation()
         stopCompass()
