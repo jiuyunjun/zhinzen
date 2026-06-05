@@ -66,6 +66,7 @@ import com.google.maps.android.compose.MapProperties
 import com.google.maps.android.compose.MapUiSettings
 import com.google.maps.android.compose.MapsComposeExperimentalApi
 import com.google.maps.android.compose.MarkerComposable
+import com.google.maps.android.compose.Polyline
 import com.google.maps.android.compose.rememberCameraPositionState
 import com.google.maps.android.compose.rememberMarkerState
 import com.lazydoglab.zhinzen.R
@@ -74,6 +75,7 @@ import com.lazydoglab.zhinzen.data.LiveLocation
 import com.lazydoglab.zhinzen.data.MemberStatus
 import com.lazydoglab.zhinzen.data.MemberView
 import com.lazydoglab.zhinzen.data.RoomCode
+import com.lazydoglab.zhinzen.data.TrackPoint
 import com.lazydoglab.zhinzen.ui.theme.ZzColor
 
 @OptIn(ExperimentalPermissionsApi::class, MapsComposeExperimentalApi::class)
@@ -85,6 +87,7 @@ fun MapScreen(
     selectedDeviceId: String?,
     deviceHeading: Float?,
     sharing: Boolean,
+    trackPoints: List<TrackPoint>,
     onLeave: () -> Unit,
     onPermissionGranted: () -> Unit,
     onSelectMember: (String?) -> Unit,
@@ -141,6 +144,13 @@ fun MapScreen(
             // Keep the Google logo + controls inside the system bars (edge-to-edge).
             contentPadding = WindowInsets.systemBars.asPaddingValues(),
         ) {
+            if (trackPoints.size >= 2) {
+                Polyline(
+                    points = trackPoints.map { LatLng(it.lat, it.lng) },
+                    color = ZzColor.Target,
+                    width = 14f,
+                )
+            }
             members.forEach { mv ->
                 val loc = mv.location ?: return@forEach
                 key(mv.member.deviceId) {

@@ -5,6 +5,29 @@
 
 ---
 
+## 2026-06-05 — Android：进房 loading + 轨迹上传/显示 ✅（已编译）
+
+**进房间慢 → loading + 预热**
+- RoomChoice 创建/加入时显示全屏半透明遮罩 + `CircularProgressIndicator`。
+- `MainActivity` 启动时 `Backend.warmUp()` 预初始化 Firestore/RTDB/Functions 客户端，
+  首次 create/join 不再付 SDK 初始化时间。
+- 根因是 gen2 函数**冷启动**（闲置后首调拉容器）。彻底消除需给 createRoom/joinRoom 设
+  `minInstances=1`（常驻热实例，约几美元/月）—— 未做，等用户确认是否愿意付费。
+
+**轨迹上传 + 显示（对齐 web Phase 3）**
+- `data/Models` 加 `TrackPoint`；`Backend.appendTrackPoint`(callable) + `fetchTrack`
+  (Firestore 查询 createdAt>since)。
+- `AppViewModel`：定位采集里每 ~12s 调一次 `appendTrackPoint`；选中他人时拉取其最近 24h
+  轨迹到 `trackPoints`，取消选择/离开清空。
+- `MapScreen`：选中成员的轨迹用 `Polyline`(紫色) 画在地图上。
+
+**验证**：`./gradlew assembleDebug` BUILD SUCCESSFUL。仅编译验证。
+
+**未做**：地图旋转/指南针按钮、过期可导航提示、轨迹按速度分段着色（web 有）、
+createRoom/joinRoom 的 minInstances（待用户定）。
+
+---
+
 ## 2026-06-05 — Android：共享开关 + 查看所有人 + track 取景 ✅（已编译）
 
 **做了什么**

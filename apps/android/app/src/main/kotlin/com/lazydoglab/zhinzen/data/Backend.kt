@@ -18,6 +18,13 @@ object Backend {
     val database: FirebaseDatabase by lazy { FirebaseDatabase.getInstance(RTDB_URL) }
     val functions: FirebaseFunctions by lazy { FirebaseFunctions.getInstance(REGION) }
 
+    /** Initialize the SDK clients early so the first room call doesn't pay init cost. */
+    fun warmUp() {
+        firestore
+        database
+        functions
+    }
+
     private fun payload(identity: DeviceIdentity, sharing: Boolean): HashMap<String, Any?> =
         hashMapOf(
             "deviceId" to identity.deviceId,
@@ -46,6 +53,37 @@ object Backend {
         val data = payload(identity, sharing).apply { put("roomId", roomId) }
         val result = functions.getHttpsCallable("joinRoom").call(data).await()
         return roomIdFrom(result.getData())
+    }
+
+    /** Append a verified track point for this device. */
+    suspend fun appendTrackPoint(identity: DeviceIdentity, roomId: String, loc: LiveLocation) {
+        val data =
+            hashMapOf(
+                "roomId" to roomId,
+                "deviceId" to identity.deviceId,
+                "deviceSecret" to identity.deviceSecret,
+                "lat" to loc.lat,
+                "lng" to loc.lng,
+                "accuracy" to loc.accuracy,
+                "heading" to loc.heading,
+                "speed" to loc.speed,
+                "createdAt" to loc.updatedAt,
+            )
+        functions.getHttpsCallable("appendTrackPoint").call(data).await()
+    }
+
+    /** Recent track points for a member since [sinceMs], ordered oldest→newest. */
+    suspend fun fetchTrack(roomId: String, deviceId: String, sinceMs: Long): List<TrackPoint> {
+        val snapshot =
+            firestore
+                .collection("rooms").document(roomId)
+                .collection("tracks").document(deviceId)
+                .collection("points")
+                .whereGreaterThan("createdAt", sinceMs)
+                .orderBy("createdAt")
+                .get()
+                .await()
+        return snapshot.documents.mapNotNull { it.toObject(TrackPoint::class.java) }
     }
 
     private fun roomIdFrom(data: Any?): String {

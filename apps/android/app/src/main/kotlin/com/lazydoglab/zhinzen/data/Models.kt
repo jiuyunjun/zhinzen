@@ -36,6 +36,13 @@ data class LiveLocation(
     val sharingLocation: Boolean = true,
 )
 
+data class TrackPoint(
+    val lat: Double = 0.0,
+    val lng: Double = 0.0,
+    val speed: Double = 0.0,
+    val createdAt: Long = 0,
+)
+
 enum class MemberStatus { ONLINE, OFFLINE, STALE, NOT_SHARING }
 
 /** A member combined with their live location and derived presence (UI shape). */

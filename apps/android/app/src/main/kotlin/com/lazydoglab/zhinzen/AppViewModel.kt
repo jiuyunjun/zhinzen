@@ -21,6 +21,7 @@ import com.lazydoglab.zhinzen.data.RoomCode
 import com.lazydoglab.zhinzen.data.RoomHistory
 import com.lazydoglab.zhinzen.data.RoomHistoryEntry
 import com.lazydoglab.zhinzen.data.RoomMember
+import com.lazydoglab.zhinzen.data.TrackPoint
 import com.lazydoglab.zhinzen.data.deriveStatus
 import com.lazydoglab.zhinzen.device.DeviceIdentity
 import com.lazydoglab.zhinzen.device.DeviceIdentityStore
@@ -67,6 +68,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         private set
     var roomHistory by mutableStateOf<List<RoomHistoryEntry>>(roomHistoryStore.list())
         private set
+    /** Recent track points of the currently selected (other) member. */
+    var trackPoints by mutableStateOf<List<TrackPoint>>(emptyList())
+        private set
 
     val members: SnapshotStateList<MemberView> = mutableStateListOf()
 
@@ -78,6 +82,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private var locationJob: Job? = null
     private var compassJob: Job? = null
     private var lastUploadAt = 0L
+    private var lastTrackAt = 0L
 
     private fun currentIdentity(): DeviceIdentity = identity.copy(displayName = displayName)
 
@@ -107,8 +112,23 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     fun selectMember(deviceId: String?) {
         selectedDeviceId = deviceId
-        // Run the compass only while pointing at someone else.
-        if (deviceId != null && deviceId != this.deviceId) startCompass() else stopCompass()
+        // Run the compass + load the track only while pointing at someone else.
+        if (deviceId != null && deviceId != this.deviceId) {
+            startCompass()
+            fetchTrack(deviceId)
+        } else {
+            stopCompass()
+            trackPoints = emptyList()
+        }
+    }
+
+    private fun fetchTrack(targetDeviceId: String) {
+        val rid = roomId ?: return
+        viewModelScope.launch {
+            val since = System.currentTimeMillis() - 24 * 60 * 60 * 1000L
+            runCatching { Backend.fetchTrack(rid, targetDeviceId, since) }
+                .onSuccess { if (selectedDeviceId == targetDeviceId) trackPoints = it }
+        }
     }
 
     private fun startCompass() {
@@ -169,6 +189,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         roomId = null
         ownLocation = null
         selectedDeviceId = null
+        trackPoints = emptyList()
         members.clear()
         phase = Phase.Room
     }
@@ -300,6 +321,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         lastUploadAt = now
                         Backend.database.getReference("liveLocations/$rid/$deviceId").setValue(live)
                     }
+                    if (now - lastTrackAt >= 12000L) {
+                        lastTrackAt = now
+                        val identity = currentIdentity()
+                        viewModelScope.launch { runCatching { Backend.appendTrackPoint(identity, rid, live) } }
+                    }
                 }
             }
     }
@@ -308,6 +334,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         locationJob?.cancel()
         locationJob = null
         lastUploadAt = 0L
+        lastTrackAt = 0L
     }
 
     override fun onCleared() {

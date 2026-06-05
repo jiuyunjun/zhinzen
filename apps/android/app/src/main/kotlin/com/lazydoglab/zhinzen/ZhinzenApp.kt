@@ -44,6 +44,7 @@ fun ZhinzenApp(viewModel: AppViewModel = viewModel()) {
                         selectedDeviceId = viewModel.selectedDeviceId,
                         deviceHeading = viewModel.deviceHeading,
                         sharing = viewModel.sharing,
+                        trackPoints = viewModel.trackPoints,
                         onLeave = viewModel::leaveRoom,
                         onPermissionGranted = viewModel::onLocationPermissionGranted,
                         onSelectMember = viewModel::selectMember,
