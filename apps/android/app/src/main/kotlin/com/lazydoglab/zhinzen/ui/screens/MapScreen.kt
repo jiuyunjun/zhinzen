@@ -144,12 +144,17 @@ fun MapScreen(
             // Keep the Google logo + controls inside the system bars (edge-to-edge).
             contentPadding = WindowInsets.systemBars.asPaddingValues(),
         ) {
-            if (trackPoints.size >= 2) {
-                Polyline(
-                    points = trackPoints.map { LatLng(it.lat, it.lng) },
-                    color = ZzColor.Target,
-                    width = 14f,
-                )
+            // Track as per-segment polylines colored by speed (mirrors the web).
+            for (i in 1 until trackPoints.size) {
+                val a = trackPoints[i - 1]
+                val b = trackPoints[i]
+                key(b.createdAt) {
+                    Polyline(
+                        points = listOf(LatLng(a.lat, a.lng), LatLng(b.lat, b.lng)),
+                        color = colorForSpeed((a.speed + b.speed) / 2.0),
+                        width = 14f,
+                    )
+                }
             }
             members.forEach { mv ->
                 val loc = mv.location ?: return@forEach
@@ -428,6 +433,15 @@ private fun OtherDetail(member: MemberView, selfLocation: LiveLocation?, deviceH
     ) {
         Text(stringResource(R.string.navigate))
     }
+
+    if (location != null && member.status != MemberStatus.ONLINE) {
+        Text(
+            text = stringResource(R.string.nav_stale_hint),
+            color = ZzColor.Stale,
+            fontSize = 12.sp,
+            modifier = Modifier.padding(top = 8.dp),
+        )
+    }
 }
 
 @Composable
@@ -633,6 +647,31 @@ private fun DirectionPointer(relative: Float?) {
         }
     }
 }
+
+/** Track segment color by speed (m/s), mirroring the web's gradient. */
+private fun colorForSpeed(speed: Double): Color {
+    val stops =
+        listOf(
+            0.0 to Triple(220, 38, 38), // stopped — red
+            1.5 to Triple(249, 115, 22), // slow — orange
+            3.0 to Triple(234, 179, 8), // walking — yellow
+            5.0 to Triple(34, 197, 94), // moving — green
+            10.0 to Triple(22, 163, 74), // fast — dark green
+        )
+    val v = speed.coerceAtLeast(0.0)
+    for (i in 1 until stops.size) {
+        val (s0, c0) = stops[i - 1]
+        val (s1, c1) = stops[i]
+        if (v <= s1) {
+            val r = ((v - s0) / (s1 - s0)).coerceIn(0.0, 1.0)
+            return Color(lerp(c0.first, c1.first, r), lerp(c0.second, c1.second, r), lerp(c0.third, c1.third, r))
+        }
+    }
+    val last = stops.last().second
+    return Color(last.first, last.second, last.third)
+}
+
+private fun lerp(a: Int, b: Int, r: Double): Int = (a + (b - a) * r).toInt()
 
 private fun statusColor(status: MemberStatus): Color =
     when (status) {

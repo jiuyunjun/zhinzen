@@ -30,4 +30,5 @@
     <string name="status_stale">Stale</string>
     <string name="status_offline">Offline</string>
     <string name="status_not_sharing">Not sharing</string>
+    <string name="nav_stale_hint">This location may be outdated — navigating to the last known spot.</string>
 </resources>
