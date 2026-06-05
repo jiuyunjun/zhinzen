@@ -5,6 +5,25 @@
 
 ---
 
+## 2026-06-05 — Android：头像图钉 + 罗盘方向指针 ✅（已编译）
+
+**做了什么**
+- **地图用头像图钉**：把默认的 Google 水滴 marker 换成自绘头像 —— 用 maps-compose 的
+  `MarkerComposable`(实验 API) 渲染 `AvatarMarker`（白底圆 + 强调色圆 + 首字母 + 状态色点）。
+  自己=蓝、他人=紫。
+- **罗盘方向指针**：`sensor/CompassController`(TYPE_ROTATION_VECTOR → azimuth，EMA 平滑)。
+  `AppViewModel` 在选中**他人**时启动罗盘、清除/离开时停止，暴露 `deviceHeading`。
+  成员详情（他人）新增方向箭头：`相对方位 = bearing(自己→目标) - 设备朝向`，用连续角
+  (continuous-angle) + `animateFloatAsState` 避免过 0°/360° 时绕圈（镜像 web 的修法）。
+  无罗盘/无定位时显示「—」。
+
+**验证**：`./gradlew assembleDebug` BUILD SUCCESSFUL。仅编译验证。
+
+**未做（后续 Android 增量）**：共享开关、track 模式取景、地图旋转/指南针按钮、轨迹上传/显示、
+过期可导航的「对方可能已移动」提示。
+
+---
+
 ## 2026-06-05 — Android：成员列表/详情 + 改名 + 历史房间 + edge-to-edge ✅（已编译）
 
 **做了什么**

@@ -2,6 +2,8 @@ package com.lazydoglab.zhinzen.ui.screens
 
 import android.content.Intent
 import android.net.Uri
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -36,7 +38,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -45,13 +49,13 @@ import androidx.compose.ui.unit.sp
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.isGranted
 import com.google.accompanist.permissions.rememberMultiplePermissionsState
-import com.google.android.gms.maps.model.BitmapDescriptorFactory
 import com.google.android.gms.maps.model.CameraPosition
 import com.google.android.gms.maps.model.LatLng
 import com.google.maps.android.compose.GoogleMap
 import com.google.maps.android.compose.MapProperties
 import com.google.maps.android.compose.MapUiSettings
-import com.google.maps.android.compose.Marker
+import com.google.maps.android.compose.MapsComposeExperimentalApi
+import com.google.maps.android.compose.MarkerComposable
 import com.google.maps.android.compose.rememberCameraPositionState
 import com.google.maps.android.compose.rememberMarkerState
 import com.lazydoglab.zhinzen.R
@@ -62,13 +66,14 @@ import com.lazydoglab.zhinzen.data.MemberView
 import com.lazydoglab.zhinzen.data.RoomCode
 import com.lazydoglab.zhinzen.ui.theme.ZzColor
 
-@OptIn(ExperimentalPermissionsApi::class)
+@OptIn(ExperimentalPermissionsApi::class, MapsComposeExperimentalApi::class)
 @Composable
 fun MapScreen(
     roomId: String?,
     members: List<MemberView>,
     ownLocation: LiveLocation?,
     selectedDeviceId: String?,
+    deviceHeading: Float?,
     onLeave: () -> Unit,
     onPermissionGranted: () -> Unit,
     onSelectMember: (String?) -> Unit,
@@ -119,15 +124,20 @@ fun MapScreen(
                     LaunchedEffect(loc.lat, loc.lng) {
                         markerState.position = LatLng(loc.lat, loc.lng)
                     }
-                    Marker(
+                    MarkerComposable(
+                        mv.member.deviceId,
+                        mv.status,
+                        mv.isSelf,
+                        mv.member.displayName,
                         state = markerState,
                         title = mv.member.displayName.ifBlank { mv.member.deviceId },
-                        icon = BitmapDescriptorFactory.defaultMarker(markerHue(mv)),
                         onClick = {
                             onSelectMember(mv.member.deviceId)
-                            false
+                            true
                         },
-                    )
+                    ) {
+                        AvatarMarker(mv)
+                    }
                 }
             }
         }
@@ -186,6 +196,7 @@ fun MapScreen(
                 MemberDetail(
                     member = selected,
                     selfLocation = selfLocation,
+                    deviceHeading = deviceHeading,
                     onClose = { onSelectMember(null) },
                     onRename = onRename,
                     onLeave = onLeave,
@@ -232,6 +243,7 @@ private fun MemberStrip(members: List<MemberView>, onSelect: (String) -> Unit) {
 private fun MemberDetail(
     member: MemberView,
     selfLocation: LiveLocation?,
+    deviceHeading: Float?,
     onClose: () -> Unit,
     onRename: (String) -> Unit,
     onLeave: () -> Unit,
@@ -266,7 +278,7 @@ private fun MemberDetail(
     if (member.isSelf) {
         SelfEditor(member, onRename, onLeave)
     } else {
-        OtherDetail(member, selfLocation)
+        OtherDetail(member, selfLocation, deviceHeading)
     }
 }
 
@@ -303,7 +315,7 @@ private fun SelfEditor(member: MemberView, onRename: (String) -> Unit, onLeave: 
 }
 
 @Composable
-private fun OtherDetail(member: MemberView, selfLocation: LiveLocation?) {
+private fun OtherDetail(member: MemberView, selfLocation: LiveLocation?, deviceHeading: Float?) {
     val context = LocalContext.current
     val location = member.location
     val distance =
@@ -314,11 +326,21 @@ private fun OtherDetail(member: MemberView, selfLocation: LiveLocation?) {
         } else {
             "—"
         }
+    val relative: Float? =
+        if (selfLocation != null && location != null && deviceHeading != null) {
+            val bearing =
+                Geo.bearingDegrees(selfLocation.lat, selfLocation.lng, location.lat, location.lng).toFloat()
+            (bearing - deviceHeading + 360f) % 360f
+        } else {
+            null
+        }
 
     Row(
         modifier = Modifier.padding(top = 12.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
+        DirectionPointer(relative)
         Metric(label = stringResource(R.string.distance), value = distance, modifier = Modifier.weight(1f))
         Metric(
             label = stringResource(R.string.last_updated),
@@ -388,13 +410,96 @@ private fun Avatar(mv: MemberView) {
     }
 }
 
-private fun markerHue(mv: MemberView): Float =
-    when {
-        mv.isSelf -> BitmapDescriptorFactory.HUE_AZURE
-        mv.status == MemberStatus.ONLINE -> BitmapDescriptorFactory.HUE_GREEN
-        mv.status == MemberStatus.STALE -> BitmapDescriptorFactory.HUE_ORANGE
-        else -> BitmapDescriptorFactory.HUE_ROSE
+/** Circular avatar drawn as the map marker (initial + status dot). */
+@Composable
+private fun AvatarMarker(mv: MemberView) {
+    val color = if (mv.isSelf) ZzColor.Self else ZzColor.Target
+    val initial = mv.member.displayName.ifBlank { "?" }.take(1)
+    Box(modifier = Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .clip(CircleShape)
+                .background(Color.White),
+            contentAlignment = Alignment.Center,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(34.dp)
+                    .clip(CircleShape)
+                    .background(color),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(text = initial, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .size(14.dp)
+                .clip(CircleShape)
+                .background(Color.White),
+            contentAlignment = Alignment.Center,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(9.dp)
+                    .clip(CircleShape)
+                    .background(statusColor(mv.status)),
+            )
+        }
     }
+}
+
+/** Arrow pointing toward the target relative to the device heading. */
+@Composable
+private fun DirectionPointer(relative: Float?) {
+    if (relative == null) {
+        Box(
+            modifier = Modifier
+                .size(56.dp)
+                .clip(CircleShape)
+                .background(ZzColor.Bg),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(text = "—", color = ZzColor.InkFaint, fontSize = 18.sp)
+        }
+        return
+    }
+
+    // Continuous (unwrapped) angle so the arrow takes the short path across 0°/360°.
+    var continuous by remember { mutableStateOf(relative) }
+    LaunchedEffect(relative) {
+        val delta = ((relative - (continuous % 360f) + 540f) % 360f) - 180f
+        continuous += delta
+    }
+    val angle by animateFloatAsState(targetValue = continuous, label = "direction")
+
+    Box(
+        modifier = Modifier
+            .size(56.dp)
+            .clip(CircleShape)
+            .background(ZzColor.Bg),
+        contentAlignment = Alignment.Center,
+    ) {
+        Canvas(
+            modifier = Modifier
+                .size(28.dp)
+                .rotate(angle),
+        ) {
+            val w = size.width
+            val h = size.height
+            val path = Path().apply {
+                moveTo(w / 2f, 0f)
+                lineTo(w * 0.82f, h)
+                lineTo(w / 2f, h * 0.66f)
+                lineTo(w * 0.18f, h)
+                close()
+            }
+            drawPath(path, color = ZzColor.Target)
+        }
+    }
+}
 
 private fun statusColor(status: MemberStatus): Color =
     when (status) {

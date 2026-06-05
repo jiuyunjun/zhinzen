@@ -25,6 +25,7 @@ import com.lazydoglab.zhinzen.data.deriveStatus
 import com.lazydoglab.zhinzen.device.DeviceIdentity
 import com.lazydoglab.zhinzen.device.DeviceIdentityStore
 import com.lazydoglab.zhinzen.location.LocationController
+import com.lazydoglab.zhinzen.sensor.CompassController
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
@@ -40,6 +41,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val identityStore = DeviceIdentityStore(application)
     private val identity = identityStore.loadOrCreate()
     private val locationController = LocationController(application)
+    private val compassController = CompassController(application)
     private val roomHistoryStore = RoomHistory(application)
 
     val deviceId: String = identity.deviceId
@@ -60,6 +62,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         private set
     var selectedDeviceId by mutableStateOf<String?>(null)
         private set
+    /** Device compass heading (degrees, 0 = north), or null if unavailable. */
+    var deviceHeading by mutableStateOf<Float?>(null)
+        private set
     var roomHistory by mutableStateOf<List<RoomHistoryEntry>>(roomHistoryStore.list())
         private set
 
@@ -71,6 +76,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private var liveRef: DatabaseReference? = null
     private var liveListener: ValueEventListener? = null
     private var locationJob: Job? = null
+    private var compassJob: Job? = null
     private var lastUploadAt = 0L
 
     private fun currentIdentity(): DeviceIdentity = identity.copy(displayName = displayName)
@@ -101,6 +107,21 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     fun selectMember(deviceId: String?) {
         selectedDeviceId = deviceId
+        // Run the compass only while pointing at someone else.
+        if (deviceId != null && deviceId != this.deviceId) startCompass() else stopCompass()
+    }
+
+    private fun startCompass() {
+        if (compassJob != null || !compassController.isAvailable()) return
+        compassJob = viewModelScope.launch {
+            compassController.headings().collect { deviceHeading = it }
+        }
+    }
+
+    private fun stopCompass() {
+        compassJob?.cancel()
+        compassJob = null
+        deviceHeading = null
     }
 
     fun removeHistory(roomId: String) {
@@ -144,6 +165,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun leaveRoom() {
         stopWatching()
         stopLocation()
+        stopCompass()
         roomId = null
         ownLocation = null
         selectedDeviceId = null
@@ -224,7 +246,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         members.clear()
         members.addAll(views)
         if (selectedDeviceId != null && views.none { it.member.deviceId == selectedDeviceId }) {
-            selectedDeviceId = null
+            selectMember(null)
         }
     }
 
@@ -265,6 +287,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     override fun onCleared() {
         stopWatching()
         stopLocation()
+        stopCompass()
         super.onCleared()
     }
 }
