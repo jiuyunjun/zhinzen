@@ -60,17 +60,20 @@ import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.isGranted
 import com.google.accompanist.permissions.rememberMultiplePermissionsState
 import com.google.android.gms.maps.CameraUpdateFactory
+import com.google.android.gms.maps.model.BitmapDescriptor
+import com.google.android.gms.maps.model.BitmapDescriptorFactory
 import com.google.android.gms.maps.model.CameraPosition
 import com.google.android.gms.maps.model.LatLng
 import com.google.android.gms.maps.model.LatLngBounds
 import com.google.maps.android.compose.GoogleMap
 import com.google.maps.android.compose.MapProperties
 import com.google.maps.android.compose.MapUiSettings
-import com.google.maps.android.compose.MapsComposeExperimentalApi
-import com.google.maps.android.compose.MarkerComposable
+import com.google.maps.android.compose.Marker
 import com.google.maps.android.compose.Polyline
 import com.google.maps.android.compose.rememberCameraPositionState
 import com.google.maps.android.compose.rememberMarkerState
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalDensity
 import com.lazydoglab.zhinzen.R
 import com.lazydoglab.zhinzen.data.Geo
 import com.lazydoglab.zhinzen.data.LiveLocation
@@ -82,7 +85,7 @@ import com.lazydoglab.zhinzen.nearby.NearbyProximity
 import com.lazydoglab.zhinzen.data.TrackPoint
 import com.lazydoglab.zhinzen.ui.theme.ZzColor
 
-@OptIn(ExperimentalPermissionsApi::class, MapsComposeExperimentalApi::class)
+@OptIn(ExperimentalPermissionsApi::class)
 @Composable
 fun MapScreen(
     roomId: String?,
@@ -94,6 +97,7 @@ fun MapScreen(
     trackPoints: List<TrackPoint>,
     headingUp: Boolean,
     nearbyRssi: Map<String, Int>,
+    nearbyScanning: Boolean,
     onLeave: () -> Unit,
     onPermissionGranted: () -> Unit,
     onSelectMember: (String?) -> Unit,
@@ -218,20 +222,17 @@ fun MapScreen(
                     LaunchedEffect(loc.lat, loc.lng) {
                         markerState.position = LatLng(loc.lat, loc.lng)
                     }
-                    MarkerComposable(
-                        mv.member.deviceId,
-                        mv.status,
-                        mv.isSelf,
-                        mv.member.displayName,
+                    val icon = rememberAvatarDescriptor(mv.member.displayName.ifBlank { "?" }.take(1), mv.isSelf)
+                    Marker(
                         state = markerState,
+                        icon = icon,
+                        anchor = Offset(0.5f, 0.5f),
                         title = mv.member.displayName.ifBlank { mv.member.deviceId },
                         onClick = {
                             onSelectMember(mv.member.deviceId)
                             true
                         },
-                    ) {
-                        AvatarMarker(mv)
-                    }
+                    )
                 }
             }
         }
@@ -326,6 +327,7 @@ fun MapScreen(
                     selfLocation = selfLocation,
                     deviceHeading = deviceHeading,
                     rssi = nearbyRssi[selected.member.deviceId],
+                    nearbyScanning = nearbyScanning,
                     onClose = { onSelectMember(null) },
                     onRename = onRename,
                     onLeave = onLeave,
@@ -374,6 +376,7 @@ private fun MemberDetail(
     selfLocation: LiveLocation?,
     deviceHeading: Float?,
     rssi: Int?,
+    nearbyScanning: Boolean,
     onClose: () -> Unit,
     onRename: (String) -> Unit,
     onLeave: () -> Unit,
@@ -408,7 +411,7 @@ private fun MemberDetail(
     if (member.isSelf) {
         SelfEditor(member, onRename, onLeave)
     } else {
-        OtherDetail(member, selfLocation, deviceHeading, rssi)
+        OtherDetail(member, selfLocation, deviceHeading, rssi, nearbyScanning)
     }
 }
 
@@ -445,7 +448,13 @@ private fun SelfEditor(member: MemberView, onRename: (String) -> Unit, onLeave: 
 }
 
 @Composable
-private fun OtherDetail(member: MemberView, selfLocation: LiveLocation?, deviceHeading: Float?, rssi: Int?) {
+private fun OtherDetail(
+    member: MemberView,
+    selfLocation: LiveLocation?,
+    deviceHeading: Float?,
+    rssi: Int?,
+    nearbyScanning: Boolean,
+) {
     val context = LocalContext.current
     val haptic = LocalHapticFeedback.current
     val location = member.location
@@ -522,6 +531,13 @@ private fun OtherDetail(member: MemberView, selfLocation: LiveLocation?, deviceH
             color = ZzColor.Self,
             fontSize = 12.5.sp,
             fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(top = 8.dp),
+        )
+    } else if (nearbyScanning) {
+        Text(
+            text = stringResource(R.string.nearby_searching),
+            color = ZzColor.InkSoft,
+            fontSize = 12.5.sp,
             modifier = Modifier.padding(top = 8.dp),
         )
     }
@@ -678,28 +694,40 @@ private fun DrawScope.drawFitAllIcon(color: Color) {
     drawLine(color, Offset(pad, max), Offset(pad, max - len), sw, StrokeCap.Round)
 }
 
-/** Circular avatar drawn as the map marker (initial only — status shown in the sheet). */
+/**
+ * Avatar map marker rendered to a real Bitmap (white ring + accent circle +
+ * initial). Drawn via android.graphics for reliability across devices — the
+ * Compose MarkerComposable path renders blank on some phones (e.g. Sony A13).
+ */
 @Composable
-private fun AvatarMarker(mv: MemberView) {
-    val color = if (mv.isSelf) ZzColor.Self else ZzColor.Target
-    val initial = mv.member.displayName.ifBlank { "?" }.take(1)
-    Box(
-        modifier = Modifier
-            .size(40.dp)
-            .clip(CircleShape)
-            .background(Color.White),
-        contentAlignment = Alignment.Center,
-    ) {
-        Box(
-            modifier = Modifier
-                .size(34.dp)
-                .clip(CircleShape)
-                .background(color),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(text = initial, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-        }
+private fun rememberAvatarDescriptor(initial: String, isSelf: Boolean): BitmapDescriptor {
+    val density = LocalDensity.current
+    val fill = (if (isSelf) ZzColor.Self else ZzColor.Target).toArgb()
+    return remember(initial, isSelf, fill) {
+        val sizePx = with(density) { 44.dp.toPx() }.toInt().coerceAtLeast(1)
+        buildAvatarBitmap(initial, fill, sizePx)
     }
+}
+
+private fun buildAvatarBitmap(initial: String, fillArgb: Int, sizePx: Int): BitmapDescriptor {
+    val bitmap = android.graphics.Bitmap.createBitmap(sizePx, sizePx, android.graphics.Bitmap.Config.ARGB_8888)
+    val canvas = android.graphics.Canvas(bitmap)
+    val center = sizePx / 2f
+    val ring = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        color = android.graphics.Color.WHITE
+    }
+    canvas.drawCircle(center, center, center, ring)
+    val fill = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { color = fillArgb }
+    canvas.drawCircle(center, center, center * 0.82f, fill)
+    val text = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        color = android.graphics.Color.WHITE
+        textAlign = android.graphics.Paint.Align.CENTER
+        textSize = sizePx * 0.42f
+        typeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
+    }
+    val metrics = text.fontMetrics
+    canvas.drawText(initial, center, center - (metrics.ascent + metrics.descent) / 2f, text)
+    return BitmapDescriptorFactory.fromBitmap(bitmap)
 }
 
 /** Arrow pointing toward the target relative to the device heading. */

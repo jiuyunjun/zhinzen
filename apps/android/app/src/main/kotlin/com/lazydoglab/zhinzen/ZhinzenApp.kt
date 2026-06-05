@@ -54,6 +54,7 @@ fun ZhinzenApp(viewModel: AppViewModel = viewModel()) {
                         trackPoints = viewModel.trackPoints,
                         headingUp = viewModel.headingUp,
                         nearbyRssi = viewModel.nearbyRssi,
+                        nearbyScanning = viewModel.nearbyScanning,
                         onLeave = viewModel::leaveRoom,
                         onPermissionGranted = viewModel::onLocationPermissionGranted,
                         onSelectMember = viewModel::selectMember,

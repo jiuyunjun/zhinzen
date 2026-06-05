@@ -5,6 +5,25 @@
 
 ---
 
+## 2026-06-05 — 修复安卓地图头像不显示（Sony A13 等）+ BLE 搜索指示 ✅（已编译）
+
+**1) 地图头像不显示**
+- 根因：成员图钉用了 maps-compose 的 `MarkerComposable`（实验 API,把 Composable 栅格化成
+  bitmap）,在部分机型(如 Sony Android 13)渲染为空白。
+- 修复：改用 **android.graphics 画 Bitmap**(白环 + 强调色圆 + 首字母)→
+  `BitmapDescriptorFactory.fromBitmap` → 普通 `Marker(icon=..., anchor=居中)`。各机型可靠。
+  `rememberAvatarDescriptor` 按 (initial,isSelf) 缓存。
+
+**2) BLE 测距「入口」不明显**
+- BLE 测距是**自动**的:点开某个成员的详情即启动广播+扫描,详情里出现「蓝牙距离:很近」等。
+- 之前没读数时静默,看不出在不在跑。新增 `nearbyScanning` 状态:扫描中但还没读到时显示
+  「蓝牙搜索附近设备中…」,读到后变「蓝牙距离:很近」。这就是可见入口/自测点。
+- 仍需**两台真机**(都装 App、同房间、蓝牙开、授予权限)才会有读数。
+
+**验证**：`./gradlew assembleDebug` ✅。头像修复需真机确认;BLE 需双机。
+
+---
+
 ## 2026-06-05 — 网页能力标签 + 安卓 BLE 近距离测距（web 已部署 / android 已编译）✅
 
 **1) 网页不显示 UWB/蓝牙能力 → 修了**

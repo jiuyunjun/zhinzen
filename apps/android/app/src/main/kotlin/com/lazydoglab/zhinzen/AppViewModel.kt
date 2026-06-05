@@ -83,6 +83,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     /** Latest BLE RSSI per nearby member deviceId (for coarse proximity). */
     var nearbyRssi by mutableStateOf<Map<String, Int>>(emptyMap())
         private set
+    /** True while BLE advertising/scanning is active for the current selection. */
+    var nearbyScanning by mutableStateOf(false)
+        private set
 
     val members: SnapshotStateList<MemberView> = mutableStateListOf()
 
@@ -135,19 +138,22 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun startNearby() {
         if (!bleController.isSupported() || !bleController.hasPermission()) return
-        bleController.start(deviceId) { token, rssi ->
-            viewModelScope.launch {
-                val match = members.firstOrNull { !it.isSelf && BleRangingController.tokenInt(it.member.deviceId) == token }
-                if (match != null) {
-                    nearbyRssi = nearbyRssi + (match.member.deviceId to rssi)
+        nearbyScanning =
+            bleController.start(deviceId) { token, rssi ->
+                viewModelScope.launch {
+                    val match =
+                        members.firstOrNull { !it.isSelf && BleRangingController.tokenInt(it.member.deviceId) == token }
+                    if (match != null) {
+                        nearbyRssi = nearbyRssi + (match.member.deviceId to rssi)
+                    }
                 }
             }
-        }
     }
 
     private fun stopNearby() {
         bleController.stop()
         nearbyRssi = emptyMap()
+        nearbyScanning = false
     }
 
     fun toggleHeadingUp() {

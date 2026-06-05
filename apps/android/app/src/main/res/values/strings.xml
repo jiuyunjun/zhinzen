@@ -39,4 +39,5 @@
     <string name="nearby_near">较近</string>
     <string name="nearby_far">较远</string>
     <string name="nearby_weak">信号弱</string>
+    <string name="nearby_searching">蓝牙搜索附近设备中…</string>
 </resources>
