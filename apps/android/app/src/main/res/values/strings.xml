@@ -18,6 +18,9 @@
     <string name="you">你</string>
     <string name="room_code">房间码</string>
     <string name="leave_room">离开房间</string>
+    <string name="cancel">取消</string>
+    <string name="leave_confirm_title">离开房间？</string>
+    <string name="leave_confirm_message">离开后将停止共享你的位置，房间里的其他人会看到你已离开。</string>
     <string name="map_coming_soon">地图将在下一步接入 Google 地图</string>
     <string name="edit_name">改名字</string>
     <string name="save">保存</string>

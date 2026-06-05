@@ -56,6 +56,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val bleController = BleRangingController(application)
     private val uwbController = UwbRangingController(application)
     private val estimators = mutableMapOf<String, NearbyEstimator>()
+    private var lastHistoryMembers: List<String> = emptyList()
 
     val deviceId: String = identity.deviceId
 
@@ -272,8 +273,16 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun leaveRoom() {
         haptics.tap()
         headingUp = false
-        stopWatching()
         stopLocation()
+        // Mark not-sharing right away so peers see us leave immediately, the same as
+        // when the app is closed (RTDB onDisconnect). Web does the same on leave.
+        val rid = roomId
+        val loc = ownLocation
+        if (rid != null && loc != null) {
+            Backend.database.getReference("liveLocations/$rid/$deviceId")
+                .setValue(loc.copy(sharingLocation = false, updatedAt = System.currentTimeMillis()))
+        }
+        stopWatching()
         stopCompass()
         stopNearby()
         stopUwb()
@@ -326,6 +335,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private fun enterRoom(id: String) {
         roomId = id
         selectedDeviceId = null
+        lastHistoryMembers = emptyList()
         roomHistory = roomHistoryStore.add(id)
         phase = Phase.Map
         startWatching(id)
@@ -389,6 +399,15 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         members.addAll(views)
         // ownLocation comes from our own RTDB echo (the foreground service uploads it).
         views.firstOrNull { it.isSelf }?.location?.let { ownLocation = it }
+        // Capture member names for the room-history avatar previews (only on change).
+        val rid = roomId
+        if (rid != null) {
+            val names = views.map { it.member.displayName.ifBlank { "?" } }
+            if (names != lastHistoryMembers) {
+                lastHistoryMembers = names
+                roomHistory = roomHistoryStore.updateMembers(rid, names)
+            }
+        }
         if (selectedDeviceId != null && views.none { it.member.deviceId == selectedDeviceId }) {
             selectMember(null)
         }

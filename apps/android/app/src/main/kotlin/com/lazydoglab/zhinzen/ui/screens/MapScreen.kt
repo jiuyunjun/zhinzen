@@ -2,6 +2,7 @@ package com.lazydoglab.zhinzen.ui.screens
 
 import android.content.Intent
 import android.net.Uri
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -25,10 +26,12 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -150,6 +153,30 @@ fun MapScreen(
     val selected = members.firstOrNull { it.member.deviceId == selectedDeviceId }
     val scope = rememberCoroutineScope()
     val haptic = LocalHapticFeedback.current
+
+    var showLeaveConfirm by remember { mutableStateOf(false) }
+    // System back: close an open member detail first, otherwise confirm leaving.
+    BackHandler {
+        if (selectedDeviceId != null) onSelectMember(null) else showLeaveConfirm = true
+    }
+    if (showLeaveConfirm) {
+        AlertDialog(
+            onDismissRequest = { showLeaveConfirm = false },
+            title = { Text(stringResource(R.string.leave_confirm_title)) },
+            text = { Text(stringResource(R.string.leave_confirm_message)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    showLeaveConfirm = false
+                    onLeave()
+                }) { Text(stringResource(R.string.leave_room)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showLeaveConfirm = false }) {
+                    Text(stringResource(R.string.cancel))
+                }
+            },
+        )
+    }
 
     // Heading-up: rotate the map to follow the device compass; reset to north off.
     // Animate (tween) between compass samples so the rotation is smooth, not steppy.
@@ -353,7 +380,7 @@ fun MapScreen(
                     nearbyScanning = nearbyScanning,
                     onClose = { onSelectMember(null) },
                     onRename = onRename,
-                    onLeave = onLeave,
+                    onLeave = { showLeaveConfirm = true },
                 )
             } else {
                 MemberStrip(

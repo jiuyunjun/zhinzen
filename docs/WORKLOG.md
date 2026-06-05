@@ -5,6 +5,27 @@
 
 ---
 
+## 2026-06-05 — 离开房间改状态 + 离开确认框 + 历史房间显示成员头像 ✅（已编译）
+
+**1) 离开房间立即改状态(web/app 对齐)**
+- app `leaveRoom` 现在先把 `liveLocations/{rid}/{deviceId}.sharingLocation` 置 false 再清理,
+  对方立刻看到"已离开/未共享",和"杀 App(onDisconnect)"一致。
+- web 本来就有:`MapScreen` 卸载时 `stopSharing()` 会写 sharingLocation=false,无需改。两端对齐。
+
+**2) 离开房间确认框(app)**
+- 把地图返回手势 + SelfEditor「离开房间」都接到 `AlertDialog`(留在房间/离开)。BackHandler
+  从 `ZhinzenApp` 移到 `MapScreen`:有选中成员先取消选中,否则弹确认框。
+
+**3) 历史房间显示当时成员头像**
+- `RoomHistoryEntry` 增 `members: List<String>`;`RoomHistory.add` 保留旧成员、新增
+  `updateMembers(roomId, names)`。VM 在 `rebuildMembers` 里当成员名集合变化时刷新(节流)。
+- `RoomChoiceScreen` 历史条目下显示成员首字母小头像(最多 6 个,多了显示 +N)。
+  旧数据无 members 字段也兼容(默认空)。
+
+**验证**：`assembleDebug` ✅。
+
+---
+
 ## 2026-06-05 — 连续 BLE 自动发现 + UWB 精准测距/测向 + 去除误导箭头 ✅（已编译）
 
 **1) 去掉误导的 BLE 方向箭头**

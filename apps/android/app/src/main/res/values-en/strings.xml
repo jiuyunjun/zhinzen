@@ -17,6 +17,9 @@
     <string name="you">You</string>
     <string name="room_code">Room code</string>
     <string name="leave_room">Leave room</string>
+    <string name="cancel">Cancel</string>
+    <string name="leave_confirm_title">Leave room?</string>
+    <string name="leave_confirm_message">Leaving stops sharing your location; others in the room will see you\'ve left.</string>
     <string name="map_coming_soon">Google Maps lands in the next step</string>
     <string name="edit_name">Edit name</string>
     <string name="save">Save</string>

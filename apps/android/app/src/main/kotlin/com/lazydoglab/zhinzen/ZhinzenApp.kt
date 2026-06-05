@@ -1,6 +1,5 @@
 package com.lazydoglab.zhinzen
 
-import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
@@ -15,12 +14,7 @@ import com.lazydoglab.zhinzen.ui.theme.ZzColor
 /** Root composable: phase router over onboarding → room → map (mirrors the web). */
 @Composable
 fun ZhinzenApp(viewModel: AppViewModel = viewModel()) {
-    // On the map, the system back gesture closes an open member detail first,
-    // otherwise leaves the room (back to the room page) instead of exiting the app.
-    BackHandler(enabled = viewModel.phase == Phase.Map) {
-        if (viewModel.selectedDeviceId != null) viewModel.selectMember(null) else viewModel.leaveRoom()
-    }
-
+    // Map back handling (close detail / confirm leave) lives inside MapScreen.
     ZhinzenTheme {
         Surface(modifier = Modifier.fillMaxSize(), color = ZzColor.Bg) {
             when (viewModel.phase) {

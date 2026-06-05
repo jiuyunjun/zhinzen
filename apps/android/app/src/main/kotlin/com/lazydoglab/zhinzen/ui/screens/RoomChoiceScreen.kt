@@ -9,9 +9,11 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -149,12 +151,27 @@ fun RoomChoiceScreen(
                             .padding(horizontal = 14.dp, vertical = 12.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text(
-                            text = RoomCode.format(entry.roomId),
-                            color = ZzColor.Ink,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.SemiBold,
-                        )
+                        Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                            Text(
+                                text = RoomCode.format(entry.roomId),
+                                color = ZzColor.Ink,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            if (entry.members.isNotEmpty()) {
+                                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    entry.members.take(6).forEach { MiniAvatar(it) }
+                                    if (entry.members.size > 6) {
+                                        Text(
+                                            text = "+${entry.members.size - 6}",
+                                            color = ZzColor.InkFaint,
+                                            fontSize = 12.sp,
+                                            modifier = Modifier.align(Alignment.CenterVertically),
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     }
                     Text(
                         text = "✕",
@@ -181,6 +198,25 @@ fun RoomChoiceScreen(
               CircularProgressIndicator(color = Color.White)
           }
       }
+    }
+}
+
+/** Small initial avatar for the room-history member preview. */
+@Composable
+private fun MiniAvatar(name: String) {
+    Box(
+        modifier = Modifier
+            .size(26.dp)
+            .clip(CircleShape)
+            .background(ZzColor.Target),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = name.ifBlank { "?" }.take(1),
+            color = Color.White,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+        )
     }
 }
 
