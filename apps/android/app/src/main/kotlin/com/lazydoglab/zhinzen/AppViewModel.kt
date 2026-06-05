@@ -27,6 +27,7 @@ import com.lazydoglab.zhinzen.device.DeviceIdentity
 import com.lazydoglab.zhinzen.device.DeviceIdentityStore
 import com.lazydoglab.zhinzen.location.LocationController
 import com.lazydoglab.zhinzen.sensor.CompassController
+import com.lazydoglab.zhinzen.util.Haptics
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
@@ -44,6 +45,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val locationController = LocationController(application)
     private val compassController = CompassController(application)
     private val roomHistoryStore = RoomHistory(application)
+    private val haptics = Haptics(application)
 
     val deviceId: String = identity.deviceId
 
@@ -105,6 +107,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun renameInRoom(name: String) {
         val trimmed = name.trim()
         if (trimmed.isEmpty()) return
+        haptics.tap()
         updateDisplayName(trimmed)
         ownLocation = ownLocation?.copy(displayName = trimmed)
         val rid = roomId ?: return
@@ -116,6 +119,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun selectMember(deviceId: String?) {
         selectedDeviceId = deviceId
         if (deviceId != null && deviceId != this.deviceId) {
+            haptics.light()
             fetchTrack(deviceId)
         } else {
             trackPoints = emptyList()
@@ -125,6 +129,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     fun toggleHeadingUp() {
         headingUp = !headingUp
+        haptics.tap()
         updateCompass()
     }
 
@@ -162,13 +167,16 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     fun createRoom() {
         if (busy) return
+        haptics.tap()
         viewModelScope.launch {
             busy = true
             errorMessage = null
             try {
                 enterRoom(Backend.createRoom(currentIdentity(), sharing))
+                haptics.success()
             } catch (e: Exception) {
                 errorMessage = e.message ?: "创建房间失败"
+                haptics.error()
             } finally {
                 busy = false
             }
@@ -179,15 +187,19 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         if (busy) return
         val parsed = RoomCode.parse(input) ?: run {
             errorMessage = "请输入有效的房间码或邀请链接"
+            haptics.error()
             return
         }
+        haptics.tap()
         viewModelScope.launch {
             busy = true
             errorMessage = null
             try {
                 enterRoom(Backend.joinRoom(currentIdentity(), parsed, sharing))
+                haptics.success()
             } catch (e: Exception) {
                 errorMessage = e.message ?: "加入房间失败"
+                haptics.error()
             } finally {
                 busy = false
             }
@@ -195,6 +207,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun leaveRoom() {
+        haptics.tap()
         headingUp = false
         stopWatching()
         stopLocation()
@@ -215,6 +228,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     /** Pause/resume sharing this device's live location. */
     fun updateSharing(on: Boolean) {
         if (sharing == on) return
+        haptics.tap()
         sharing = on
         if (on) {
             // Immediately mark sharing again so peers update without waiting for a fix.

@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { parseRoomInput, roomFromUrl } from '../lib/roomCode';
 import { addRoomToHistory } from '../lib/roomHistory';
+import { haptics } from '../lib/haptics';
 import { useDeviceStore } from './deviceStore';
 import {
   buildRoomPayload,
@@ -64,10 +65,12 @@ export const useRoomStore = create<RoomState>((set, get) => ({
       syncUrl(room.roomId);
       addRoomToHistory(room.roomId);
       set({ roomId: room.roomId, pendingJoinCode: null, sharing: true, busy: false });
+      haptics.success();
       return room.roomId;
     } catch (error) {
       const roomError = toRoomApiError(error);
       set({ busy: false, error: roomError.code });
+      haptics.error();
       return null;
     }
   },
@@ -89,10 +92,12 @@ export const useRoomStore = create<RoomState>((set, get) => ({
       syncUrl(room.roomId);
       addRoomToHistory(room.roomId);
       set({ roomId: room.roomId, pendingJoinCode: null, sharing: true, busy: false });
+      haptics.success();
       return room.roomId;
     } catch (error) {
       const roomError = toRoomApiError(error);
       set({ busy: false, error: roomError.code });
+      haptics.error();
       return null;
     }
   },

@@ -1,5 +1,6 @@
 import type { CSSProperties, ReactNode } from 'react';
 import { color as tokens } from '@zhinzen/shared-ui';
+import { haptics } from '../lib/haptics';
 
 interface PrimaryButtonProps {
   children: ReactNode;
@@ -20,7 +21,13 @@ export function PrimaryButton({
   return (
     <button
       type="button"
-      onClick={onClick}
+      onClick={
+        onClick &&
+        (() => {
+          haptics.tap();
+          onClick();
+        })
+      }
       disabled={disabled}
       style={{
         width: '100%',

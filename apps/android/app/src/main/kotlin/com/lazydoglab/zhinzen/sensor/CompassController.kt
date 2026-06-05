@@ -30,6 +30,8 @@ class CompassController(context: Context) {
         val rotation = FloatArray(9)
         val orientation = FloatArray(3)
         var smoothed = Float.NaN
+        var lastEmitted = Float.NaN
+        var lastEmitAt = 0L
 
         val listener =
             object : SensorEventListener {
@@ -44,17 +46,30 @@ class CompassController(context: Context) {
                             val delta = ((raw - smoothed + 540f) % 360f) - 180f
                             (smoothed + SMOOTHING_ALPHA * delta + 360f) % 360f
                         }
-                    trySend(smoothed)
+                    // Throttle emissions so we don't flood Compose with recompositions
+                    // (a key cause of heading-up jank): emit on a meaningful change,
+                    // rate-limited.
+                    val now = System.currentTimeMillis()
+                    val moved =
+                        lastEmitted.isNaN() ||
+                            kotlin.math.abs(((smoothed - lastEmitted + 540f) % 360f) - 180f) >= MIN_EMIT_DELTA
+                    if (moved && now - lastEmitAt >= MIN_EMIT_INTERVAL_MS) {
+                        lastEmitted = smoothed
+                        lastEmitAt = now
+                        trySend(smoothed)
+                    }
                 }
 
                 override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
             }
 
-        sensorManager.registerListener(listener, sensor, SensorManager.SENSOR_DELAY_UI)
+        sensorManager.registerListener(listener, sensor, SensorManager.SENSOR_DELAY_GAME)
         awaitClose { sensorManager.unregisterListener(listener) }
     }
 
     private companion object {
         const val SMOOTHING_ALPHA = 0.15f
+        const val MIN_EMIT_DELTA = 0.8f
+        const val MIN_EMIT_INTERVAL_MS = 40L
     }
 }

@@ -49,7 +49,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -125,13 +127,22 @@ fun MapScreen(
     val selfLocation = ownLocation ?: members.firstOrNull { it.isSelf }?.location
     val selected = members.firstOrNull { it.member.deviceId == selectedDeviceId }
     val scope = rememberCoroutineScope()
+    val haptic = LocalHapticFeedback.current
 
     // Heading-up: rotate the map to follow the device compass; reset to north off.
+    // Animate (tween) between compass samples so the rotation is smooth, not steppy.
     LaunchedEffect(headingUp, deviceHeading) {
         if (headingUp && deviceHeading != null) {
             val pos = cameraPositionState.position
-            cameraPositionState.position = CameraPosition.Builder()
-                .target(pos.target).zoom(pos.zoom).tilt(pos.tilt).bearing(deviceHeading).build()
+            runCatching {
+                cameraPositionState.animate(
+                    CameraUpdateFactory.newCameraPosition(
+                        CameraPosition.Builder()
+                            .target(pos.target).zoom(pos.zoom).tilt(pos.tilt).bearing(deviceHeading).build(),
+                    ),
+                    durationMs = 220,
+                )
+            }
         }
     }
     LaunchedEffect(headingUp) {
@@ -268,6 +279,7 @@ fun MapScreen(
             FabButton(
                 icon = FabIcon.FitAll,
                 onClick = {
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                     val pins = members.mapNotNull { it.location }
                     if (pins.isNotEmpty()) {
                         val builder = LatLngBounds.builder()
@@ -419,6 +431,7 @@ private fun SelfEditor(member: MemberView, onRename: (String) -> Unit, onLeave: 
 @Composable
 private fun OtherDetail(member: MemberView, selfLocation: LiveLocation?, deviceHeading: Float?) {
     val context = LocalContext.current
+    val haptic = LocalHapticFeedback.current
     val location = member.location
     val distance =
         if (selfLocation != null && location != null) {
@@ -454,6 +467,7 @@ private fun OtherDetail(member: MemberView, selfLocation: LiveLocation?, deviceH
     Button(
         onClick = {
             if (location != null) {
+                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                 val uri =
                     Uri.parse(
                         "https://www.google.com/maps/dir/?api=1&destination=" +
@@ -705,22 +719,25 @@ private fun DirectionPointer(relative: Float?) {
     }
 }
 
-/** Track segment color by speed (m/s), mirroring the web's gradient. */
-private fun colorForSpeed(speed: Double): Color {
+/**
+ * Track segment color by speed. Input is m/s; thresholds are in km/h:
+ * 0–15 red, ~28 yellow, 40+ green, with a smooth gradient between (mirrors web).
+ */
+private fun colorForSpeed(speedMps: Double): Color {
+    val kmh = (speedMps * 3.6).coerceAtLeast(0.0)
     val stops =
         listOf(
-            0.0 to Triple(220, 38, 38), // stopped — red
-            1.5 to Triple(249, 115, 22), // slow — orange
-            3.0 to Triple(234, 179, 8), // walking — yellow
-            5.0 to Triple(34, 197, 94), // moving — green
-            10.0 to Triple(22, 163, 74), // fast — dark green
+            0.0 to Triple(220, 38, 38), // red
+            15.0 to Triple(220, 38, 38), // still red at the top of the slow band
+            28.0 to Triple(234, 179, 8), // yellow (middle of 16–39)
+            40.0 to Triple(34, 197, 94), // green from 40 km/h
+            200.0 to Triple(34, 197, 94),
         )
-    val v = speed.coerceAtLeast(0.0)
     for (i in 1 until stops.size) {
         val (s0, c0) = stops[i - 1]
         val (s1, c1) = stops[i]
-        if (v <= s1) {
-            val r = ((v - s0) / (s1 - s0)).coerceIn(0.0, 1.0)
+        if (kmh <= s1) {
+            val r = ((kmh - s0) / (s1 - s0)).coerceIn(0.0, 1.0)
             return Color(lerp(c0.first, c1.first, r), lerp(c0.second, c1.second, r), lerp(c0.third, c1.third, r))
         }
     }

@@ -386,15 +386,16 @@ function clearTrackSegments(segments: google.maps.Polyline[]): void {
   for (const segment of segments) segment.setMap(null);
 }
 
-function colorForTrackSpeed(speed: number): string {
+// Input speed is m/s; thresholds are in km/h: 0–15 red, ~28 yellow, 40+ green.
+function colorForTrackSpeed(speedMps: number): string {
   const stops = [
     { speed: 0, color: [220, 38, 38] },
-    { speed: 1.5, color: [249, 115, 22] },
-    { speed: 3, color: [234, 179, 8] },
-    { speed: 5, color: [34, 197, 94] },
-    { speed: 10, color: [22, 163, 74] },
+    { speed: 15, color: [220, 38, 38] },
+    { speed: 28, color: [234, 179, 8] },
+    { speed: 40, color: [34, 197, 94] },
+    { speed: 200, color: [34, 197, 94] },
   ] as const;
-  const value = Number.isFinite(speed) ? Math.max(0, speed) : 0;
+  const value = Number.isFinite(speedMps) ? Math.max(0, speedMps * 3.6) : 0;
 
   for (let index = 1; index < stops.length; index += 1) {
     const previous = stops[index - 1];

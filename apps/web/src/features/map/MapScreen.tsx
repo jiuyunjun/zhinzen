@@ -11,6 +11,7 @@ import { Icon, type IconName } from '../../components/Icon';
 import { Toast, useToast } from '../../components/Toast';
 import { LangToggle } from '../../components/LangToggle';
 import { isMapRotatable } from '../../lib/env';
+import { haptics } from '../../lib/haptics';
 import { formatRoomCode, inviteLink } from '../../lib/roomCode';
 import { fetchRecentTrackPoints } from '../../lib/trackApi';
 import { GoogleMapView } from './GoogleMapView';
@@ -166,6 +167,7 @@ export function MapScreen({ onLeave }: { onLeave: () => void }) {
     } catch {
       // Clipboard may be blocked; still confirm the intent in the skeleton.
     }
+    haptics.success();
     flash(t('copied'));
   };
 
@@ -177,6 +179,7 @@ export function MapScreen({ onLeave }: { onLeave: () => void }) {
   };
 
   const onSelectMember = (targetDeviceId: string) => {
+    haptics.light();
     setSelectedDeviceId(targetDeviceId);
     // Selecting another member enters track mode (frame me + them); selecting
     // myself opens the self editor and keeps following me.
@@ -423,7 +426,10 @@ function Fab({
   return (
     <button
       type="button"
-      onClick={onClick}
+      onClick={() => {
+        haptics.tap();
+        onClick();
+      }}
       aria-label={label}
       style={{
         width: 46,

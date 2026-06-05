@@ -5,6 +5,32 @@
 
 ---
 
+## 2026-06-05 — 震动反馈 + heading-up 平滑 + 轨迹配色阈值（web + android）✅
+
+**1) heading-up 卡顿**
+- 原因主要是罗盘采样过密 → Compose 重组风暴 + 相机直接 set 造成跳变。
+- `CompassController`：采样率 `SENSOR_DELAY_GAME`，并加节流（变化 ≥0.8° 且间隔 ≥40ms 才 emit），
+  大幅减少重组。
+- `MapScreen` heading-up 跟随改用 `cameraPositionState.animate(..., durationMs=220)` 做**补间**，
+  样本之间平滑过渡，不再一卡一卡。
+
+**2) 震动反馈（web + app）**
+- web `lib/haptics.ts`（Vibration API）：`tap/light/success/error`。接入 `PrimaryButton`(tap)、
+  地图 FAB(tap)、复制邀请(success)、选中成员(light)、`roomStore` 创建/加入成功(success)/失败(error)。
+  注：iOS Safari 不支持 Vibration，自动 no-op。
+- android `util/Haptics.kt`（Vibrator + VibrationEffect，加了 `VIBRATE` 权限）：同样 tap/light/
+  success/error。接入 ViewModel 的创建/加入(tap+success/error)、共享开关/指南针/改名/离开(tap)、
+  选中成员(light)，以及地图「查看所有人」/导航按钮(Compose `LocalHapticFeedback`)。
+
+**3) 轨迹配色阈值改为 km/h + 渐变**
+- 之前用 m/s 阈值，城市速度容易一直偏红。改为按 **km/h**：0–15 红、~28 黄、40+ 绿，
+  区间平滑渐变。web(`GoogleMapView.colorForTrackSpeed`) 与 android(`MapScreen.colorForSpeed`)
+  都把输入 m/s ×3.6 转 km/h 后按新 stops 插值。
+
+**验证**：android `./gradlew assembleDebug` ✅；web `npm run build` ✅。**web 未重新部署**。
+
+---
+
 ## 2026-06-05 — Android：地图旋转 + 指南针/heading-up ✅（已编译）
 
 **做了什么**
