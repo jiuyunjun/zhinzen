@@ -81,8 +81,8 @@ import com.lazydoglab.zhinzen.data.LiveLocation
 import com.lazydoglab.zhinzen.data.MemberStatus
 import com.lazydoglab.zhinzen.data.MemberView
 import com.lazydoglab.zhinzen.data.RoomCode
-import com.lazydoglab.zhinzen.nearby.BleRangingController
-import com.lazydoglab.zhinzen.nearby.NearbyProximity
+import com.lazydoglab.zhinzen.nearby.NearbyEstimate
+import com.lazydoglab.zhinzen.nearby.NearbyTrend
 import com.lazydoglab.zhinzen.data.TrackPoint
 import com.lazydoglab.zhinzen.ui.theme.ZzColor
 
@@ -97,7 +97,7 @@ fun MapScreen(
     sharing: Boolean,
     trackPoints: List<TrackPoint>,
     headingUp: Boolean,
-    nearbyRssi: Map<String, Int>,
+    nearbyEstimate: NearbyEstimate?,
     nearbyScanning: Boolean,
     onLeave: () -> Unit,
     onPermissionGranted: () -> Unit,
@@ -345,7 +345,7 @@ fun MapScreen(
                     member = selected,
                     selfLocation = selfLocation,
                     deviceHeading = deviceHeading,
-                    rssi = nearbyRssi[selected.member.deviceId],
+                    estimate = nearbyEstimate,
                     nearbyScanning = nearbyScanning,
                     onClose = { onSelectMember(null) },
                     onRename = onRename,
@@ -394,7 +394,7 @@ private fun MemberDetail(
     member: MemberView,
     selfLocation: LiveLocation?,
     deviceHeading: Float?,
-    rssi: Int?,
+    estimate: NearbyEstimate?,
     nearbyScanning: Boolean,
     onClose: () -> Unit,
     onRename: (String) -> Unit,
@@ -430,7 +430,7 @@ private fun MemberDetail(
     if (member.isSelf) {
         SelfEditor(member, onRename, onLeave)
     } else {
-        OtherDetail(member, selfLocation, deviceHeading, rssi, nearbyScanning)
+        OtherDetail(member, selfLocation, deviceHeading, estimate, nearbyScanning)
     }
 }
 
@@ -471,7 +471,7 @@ private fun OtherDetail(
     member: MemberView,
     selfLocation: LiveLocation?,
     deviceHeading: Float?,
-    rssi: Int?,
+    estimate: NearbyEstimate?,
     nearbyScanning: Boolean,
 ) {
     val context = LocalContext.current
@@ -537,26 +537,53 @@ private fun OtherDetail(
         )
     }
 
-    if (rssi != null) {
-        val proximityRes =
-            when (BleRangingController.proximityForRssi(rssi)) {
-                NearbyProximity.VERY_NEAR -> R.string.nearby_very_near
-                NearbyProximity.NEAR -> R.string.nearby_near
-                NearbyProximity.FAR -> R.string.nearby_far
-                NearbyProximity.WEAK -> R.string.nearby_weak
+    // Indoor: GPS is unreliable, lean on Bluetooth to find each other.
+    val accuracy = location?.accuracy ?: selfLocation?.accuracy
+    if (accuracy != null && accuracy > 30) {
+        Text(
+            text = stringResource(R.string.nearby_indoor_hint),
+            color = ZzColor.Stale,
+            fontSize = 12.sp,
+            modifier = Modifier.padding(top = 8.dp),
+        )
+    }
+
+    if (estimate != null) {
+        val trendRes =
+            when (estimate.trend) {
+                NearbyTrend.CLOSER -> R.string.trend_closer
+                NearbyTrend.FARTHER -> R.string.trend_farther
+                NearbyTrend.STEADY -> R.string.trend_steady
             }
         Row(
-            modifier = Modifier.padding(top = 8.dp),
+            modifier = Modifier.padding(top = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            SignalBars(barsForRssi(rssi))
-            Text(
-                text = stringResource(R.string.nearby_detail, stringResource(proximityRes), rssi),
-                color = ZzColor.Self,
-                fontSize = 12.5.sp,
-                fontWeight = FontWeight.SemiBold,
-            )
+            NearbyDirection(bestHeadingDeg = estimate.bestHeadingDeg, deviceHeading = deviceHeading)
+            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text(
+                    text = stringResource(rangeRes(estimate.distanceMeters)),
+                    color = ZzColor.Ink,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    SignalBars(barsForRssi(estimate.rssi))
+                    Text(
+                        text = "${estimate.rssi} dBm · ${stringResource(trendRes)}",
+                        color = ZzColor.InkSoft,
+                        fontSize = 12.sp,
+                    )
+                }
+                if (estimate.bestHeadingDeg == null) {
+                    Text(
+                        text = stringResource(R.string.nearby_dir_unknown),
+                        color = ZzColor.InkFaint,
+                        fontSize = 11.5.sp,
+                    )
+                }
+            }
         }
     } else if (nearbyScanning) {
         Text(
@@ -567,6 +594,55 @@ private fun OtherDetail(
         )
     }
 }
+
+/** Arrow toward the heading where the BLE signal is strongest (IMU + RSSI). */
+@Composable
+private fun NearbyDirection(bestHeadingDeg: Float?, deviceHeading: Float?) {
+    val relative =
+        if (bestHeadingDeg != null && deviceHeading != null) {
+            ((bestHeadingDeg - deviceHeading + 360f) % 360f)
+        } else {
+            null
+        }
+    Box(
+        modifier = Modifier
+            .size(56.dp)
+            .clip(CircleShape)
+            .background(ZzColor.Bg),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (relative == null) {
+            Text(text = "?", color = ZzColor.InkFaint, fontSize = 20.sp)
+        } else {
+            var continuous by remember { mutableStateOf(relative) }
+            LaunchedEffect(relative) {
+                continuous += ((relative - (continuous % 360f) + 540f) % 360f) - 180f
+            }
+            val angle by animateFloatAsState(targetValue = continuous, label = "nearbyDir")
+            Canvas(modifier = Modifier.size(26.dp).rotate(angle)) {
+                val w = size.width
+                val h = size.height
+                val path = Path().apply {
+                    moveTo(w / 2f, 0f)
+                    lineTo(w * 0.82f, h)
+                    lineTo(w / 2f, h * 0.66f)
+                    lineTo(w * 0.18f, h)
+                    close()
+                }
+                drawPath(path, ZzColor.Self)
+            }
+        }
+    }
+}
+
+private fun rangeRes(distanceMeters: Double): Int =
+    when {
+        distanceMeters < 2 -> R.string.nearby_range_1
+        distanceMeters < 5 -> R.string.nearby_range_2
+        distanceMeters < 10 -> R.string.nearby_range_3
+        distanceMeters < 20 -> R.string.nearby_range_4
+        else -> R.string.nearby_range_5
+    }
 
 @Composable
 private fun Metric(label: String, value: String, modifier: Modifier = Modifier) {

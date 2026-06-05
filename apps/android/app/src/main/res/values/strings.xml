@@ -41,4 +41,14 @@
     <string name="nearby_far">较远</string>
     <string name="nearby_weak">信号弱</string>
     <string name="nearby_searching">蓝牙搜索附近设备中…</string>
+    <string name="nearby_indoor_hint">室内 GPS 不准，建议用蓝牙找人</string>
+    <string name="nearby_dir_unknown">走动几步以估计方向</string>
+    <string name="nearby_range_1">蓝牙距离 约 1–2 米</string>
+    <string name="nearby_range_2">蓝牙距离 约 2–5 米</string>
+    <string name="nearby_range_3">蓝牙距离 约 5–10 米</string>
+    <string name="nearby_range_4">蓝牙距离 约 10–20 米</string>
+    <string name="nearby_range_5">蓝牙距离 20 米以上</string>
+    <string name="trend_closer">正在靠近 ↑</string>
+    <string name="trend_farther">正在远离 ↓</string>
+    <string name="trend_steady">信号稳定</string>
 </resources>

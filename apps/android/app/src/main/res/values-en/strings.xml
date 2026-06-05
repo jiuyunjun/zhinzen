@@ -40,4 +40,14 @@
     <string name="nearby_far">Far</string>
     <string name="nearby_weak">Weak signal</string>
     <string name="nearby_searching">Scanning for nearby devices…</string>
+    <string name="nearby_indoor_hint">Indoor GPS is poor — use Bluetooth to find each other</string>
+    <string name="nearby_dir_unknown">Walk a few steps to estimate direction</string>
+    <string name="nearby_range_1">Bluetooth ~1–2 m</string>
+    <string name="nearby_range_2">Bluetooth ~2–5 m</string>
+    <string name="nearby_range_3">Bluetooth ~5–10 m</string>
+    <string name="nearby_range_4">Bluetooth ~10–20 m</string>
+    <string name="nearby_range_5">Bluetooth 20 m+</string>
+    <string name="trend_closer">Getting closer ↑</string>
+    <string name="trend_farther">Getting farther ↓</string>
+    <string name="trend_steady">Steady</string>
 </resources>

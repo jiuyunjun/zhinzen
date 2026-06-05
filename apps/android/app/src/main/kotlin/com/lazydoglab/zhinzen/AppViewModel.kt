@@ -27,6 +27,8 @@ import com.lazydoglab.zhinzen.device.DeviceIdentity
 import com.lazydoglab.zhinzen.device.DeviceIdentityStore
 import com.lazydoglab.zhinzen.location.LocationController
 import com.lazydoglab.zhinzen.nearby.BleRangingController
+import com.lazydoglab.zhinzen.nearby.NearbyEstimate
+import com.lazydoglab.zhinzen.nearby.NearbyEstimator
 import com.lazydoglab.zhinzen.sensor.CompassController
 import com.lazydoglab.zhinzen.service.LocationSharingService
 import com.lazydoglab.zhinzen.util.DeviceCapabilities
@@ -50,6 +52,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val haptics = Haptics(application)
     private val capabilities = DeviceCapabilities.detect(application)
     private val bleController = BleRangingController(application)
+    private val nearbyEstimator = NearbyEstimator()
 
     val deviceId: String = identity.deviceId
 
@@ -80,8 +83,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     /** Recent track points of the currently selected (other) member. */
     var trackPoints by mutableStateOf<List<TrackPoint>>(emptyList())
         private set
-    /** Latest BLE RSSI per nearby member deviceId (for coarse proximity). */
-    var nearbyRssi by mutableStateOf<Map<String, Int>>(emptyMap())
+    /** Near-distance estimate (BLE + compass) for the selected member. */
+    var nearbyEstimate by mutableStateOf<NearbyEstimate?>(null)
         private set
     /** True while BLE advertising/scanning is active for the current selection. */
     var nearbyScanning by mutableStateOf(false)
@@ -138,13 +141,15 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun startNearby() {
         if (!bleController.isSupported() || !bleController.hasPermission()) return
+        nearbyEstimator.reset()
+        nearbyEstimate = null
         nearbyScanning =
             bleController.start(deviceId) { token, rssi ->
                 viewModelScope.launch {
-                    val match =
-                        members.firstOrNull { !it.isSelf && BleRangingController.tokenInt(it.member.deviceId) == token }
-                    if (match != null) {
-                        nearbyRssi = nearbyRssi + (match.member.deviceId to rssi)
+                    // Only fuse readings from the member we're currently finding.
+                    val sel = selectedDeviceId ?: return@launch
+                    if (BleRangingController.tokenInt(sel) == token) {
+                        nearbyEstimate = nearbyEstimator.onSample(rssi, deviceHeading, System.currentTimeMillis())
                     }
                 }
             }
@@ -152,7 +157,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun stopNearby() {
         bleController.stop()
-        nearbyRssi = emptyMap()
+        nearbyEstimate = null
         nearbyScanning = false
     }
 
