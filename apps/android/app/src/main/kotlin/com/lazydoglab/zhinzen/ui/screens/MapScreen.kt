@@ -41,8 +41,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -207,9 +213,9 @@ fun MapScreen(
                 .padding(end = 12.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            FabGlyph(glyph = if (sharing) "⏸" else "▶", active = !sharing, onClick = onToggleSharing)
-            FabGlyph(
-                glyph = "⤢",
+            FabButton(icon = if (sharing) FabIcon.Pause else FabIcon.Play, active = !sharing, onClick = onToggleSharing)
+            FabButton(
+                icon = FabIcon.FitAll,
                 onClick = {
                     val pins = members.mapNotNull { it.location }
                     if (pins.isNotEmpty()) {
@@ -437,75 +443,133 @@ private fun Metric(label: String, value: String, modifier: Modifier = Modifier) 
 private fun Avatar(mv: MemberView) {
     val color = if (mv.isSelf) ZzColor.Self else ZzColor.Target
     val initial = (mv.member.displayName.ifBlank { "?" }).take(1)
-    Box(
-        modifier = Modifier
-            .size(44.dp)
-            .clip(CircleShape)
-            .background(color),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(text = initial, color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+    // Outer box is NOT clipped, so the status dot can sit on the circle's edge
+    // without being cut off by the circular clip.
+    Box(modifier = Modifier.size(46.dp), contentAlignment = Alignment.Center) {
+        Box(
+            modifier = Modifier
+                .size(44.dp)
+                .clip(CircleShape)
+                .background(color),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(text = initial, color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+        }
+        // status dot with a white ring, on the bottom-right edge
         Box(
             modifier = Modifier
                 .align(Alignment.BottomEnd)
-                .size(12.dp)
+                .size(15.dp)
                 .clip(CircleShape)
-                .background(statusColor(mv.status)),
-        )
+                .background(Color.White),
+            contentAlignment = Alignment.Center,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(11.dp)
+                    .clip(CircleShape)
+                    .background(statusColor(mv.status)),
+            )
+        }
     }
 }
 
+private enum class FabIcon { Pause, Play, FitAll }
+
+/** Floating action button matching the web's rounded-16 glass FABs, with a
+ *  Canvas-drawn icon (geometric, like the web icon set). */
 @Composable
-private fun FabGlyph(glyph: String, active: Boolean = false, onClick: () -> Unit) {
+private fun FabButton(icon: FabIcon, active: Boolean = false, onClick: () -> Unit) {
+    val tint = if (active) Color.White else ZzColor.Ink
     Box(
         modifier = Modifier
             .size(46.dp)
+            .shadow(6.dp, RoundedCornerShape(16.dp))
             .clip(RoundedCornerShape(16.dp))
-            .background(if (active) ZzColor.Self else Color(0xF2FFFFFF))
+            .background(if (active) ZzColor.Self else Color.White)
             .clickable { onClick() },
         contentAlignment = Alignment.Center,
     ) {
-        Text(text = glyph, color = if (active) Color.White else ZzColor.Ink, fontSize = 18.sp)
+        Canvas(modifier = Modifier.size(22.dp)) {
+            when (icon) {
+                FabIcon.Pause -> drawPauseIcon(tint)
+                FabIcon.Play -> drawPlayIcon(tint)
+                FabIcon.FitAll -> drawFitAllIcon(tint)
+            }
+        }
     }
 }
 
-/** Circular avatar drawn as the map marker (initial + status dot). */
+private fun DrawScope.drawPauseIcon(color: Color) {
+    val w = size.width
+    val h = size.height
+    val barW = w * 0.2f
+    val barH = h * 0.66f
+    val top = (h - barH) / 2f
+    val gap = w * 0.16f
+    drawRoundRect(
+        color = color,
+        topLeft = Offset(w / 2f - gap / 2f - barW, top),
+        size = Size(barW, barH),
+        cornerRadius = CornerRadius(barW * 0.4f),
+    )
+    drawRoundRect(
+        color = color,
+        topLeft = Offset(w / 2f + gap / 2f, top),
+        size = Size(barW, barH),
+        cornerRadius = CornerRadius(barW * 0.4f),
+    )
+}
+
+private fun DrawScope.drawPlayIcon(color: Color) {
+    val w = size.width
+    val h = size.height
+    val path = Path().apply {
+        moveTo(w * 0.3f, h * 0.22f)
+        lineTo(w * 0.82f, h * 0.5f)
+        lineTo(w * 0.3f, h * 0.78f)
+        close()
+    }
+    drawPath(path, color)
+}
+
+private fun DrawScope.drawFitAllIcon(color: Color) {
+    val s = size.minDimension
+    val pad = s * 0.16f
+    val len = s * 0.26f
+    val sw = s * 0.1f
+    val max = s - pad
+    // four corner brackets
+    drawLine(color, Offset(pad, pad + len), Offset(pad, pad), sw, StrokeCap.Round)
+    drawLine(color, Offset(pad, pad), Offset(pad + len, pad), sw, StrokeCap.Round)
+    drawLine(color, Offset(max - len, pad), Offset(max, pad), sw, StrokeCap.Round)
+    drawLine(color, Offset(max, pad), Offset(max, pad + len), sw, StrokeCap.Round)
+    drawLine(color, Offset(max, max - len), Offset(max, max), sw, StrokeCap.Round)
+    drawLine(color, Offset(max, max), Offset(max - len, max), sw, StrokeCap.Round)
+    drawLine(color, Offset(pad + len, max), Offset(pad, max), sw, StrokeCap.Round)
+    drawLine(color, Offset(pad, max), Offset(pad, max - len), sw, StrokeCap.Round)
+}
+
+/** Circular avatar drawn as the map marker (initial only — status shown in the sheet). */
 @Composable
 private fun AvatarMarker(mv: MemberView) {
     val color = if (mv.isSelf) ZzColor.Self else ZzColor.Target
     val initial = mv.member.displayName.ifBlank { "?" }.take(1)
-    Box(modifier = Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+    Box(
+        modifier = Modifier
+            .size(40.dp)
+            .clip(CircleShape)
+            .background(Color.White),
+        contentAlignment = Alignment.Center,
+    ) {
         Box(
             modifier = Modifier
-                .size(40.dp)
+                .size(34.dp)
                 .clip(CircleShape)
-                .background(Color.White),
+                .background(color),
             contentAlignment = Alignment.Center,
         ) {
-            Box(
-                modifier = Modifier
-                    .size(34.dp)
-                    .clip(CircleShape)
-                    .background(color),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(text = initial, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-            }
-        }
-        Box(
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .size(14.dp)
-                .clip(CircleShape)
-                .background(Color.White),
-            contentAlignment = Alignment.Center,
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(9.dp)
-                    .clip(CircleShape)
-                    .background(statusColor(mv.status)),
-            )
+            Text(text = initial, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
         }
     }
 }

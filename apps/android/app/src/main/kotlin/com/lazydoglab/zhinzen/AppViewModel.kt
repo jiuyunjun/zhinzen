@@ -183,6 +183,14 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         if (sharing == on) return
         sharing = on
         if (on) {
+            // Immediately mark sharing again so peers update without waiting for a fix.
+            val rid = roomId
+            val loc = ownLocation
+            if (rid != null && loc != null) {
+                val resumed = loc.copy(sharingLocation = true, updatedAt = System.currentTimeMillis())
+                ownLocation = resumed
+                Backend.database.getReference("liveLocations/$rid/$deviceId").setValue(resumed)
+            }
             if (locationController.hasPermission()) startLocation()
         } else {
             stopLocation()
