@@ -14,6 +14,7 @@ import com.google.firebase.database.DatabaseReference
 import com.google.firebase.database.ValueEventListener
 import com.google.firebase.firestore.ListenerRegistration
 import com.lazydoglab.zhinzen.data.Backend
+import com.lazydoglab.zhinzen.data.Geo
 import com.lazydoglab.zhinzen.data.LiveLocation
 import com.lazydoglab.zhinzen.data.MemberStatus
 import com.lazydoglab.zhinzen.data.MemberView
@@ -88,6 +89,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private var compassJob: Job? = null
     private var lastUploadAt = 0L
     private var lastTrackAt = 0L
+    private var lastTrackLat: Double? = null
+    private var lastTrackLng: Double? = null
 
     private fun currentIdentity(): DeviceIdentity = identity.copy(displayName = displayName)
 
@@ -348,8 +351,18 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         lastUploadAt = now
                         Backend.database.getReference("liveLocations/$rid/$deviceId").setValue(live)
                     }
-                    if (now - lastTrackAt >= 12000L) {
+                    // Adaptive track sampling: record once we've moved enough (so
+                    // fast motion yields denser points and fewer corner-cutting gaps),
+                    // with a heartbeat when still, throttled to a minimum interval.
+                    val elapsed = now - lastTrackAt
+                    val movedEnough =
+                        lastTrackLat?.let {
+                            Geo.distanceMeters(it, lastTrackLng ?: 0.0, live.lat, live.lng) >= TRACK_MIN_DISTANCE_M
+                        } ?: true
+                    if ((elapsed >= TRACK_MIN_INTERVAL_MS && movedEnough) || elapsed >= TRACK_MAX_INTERVAL_MS) {
                         lastTrackAt = now
+                        lastTrackLat = live.lat
+                        lastTrackLng = live.lng
                         val identity = currentIdentity()
                         viewModelScope.launch { runCatching { Backend.appendTrackPoint(identity, rid, live) } }
                     }
@@ -362,6 +375,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         locationJob = null
         lastUploadAt = 0L
         lastTrackAt = 0L
+        lastTrackLat = null
+        lastTrackLng = null
     }
 
     override fun onCleared() {
@@ -369,5 +384,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         stopLocation()
         stopCompass()
         super.onCleared()
+    }
+
+    private companion object {
+        const val TRACK_MIN_INTERVAL_MS = 2_500L
+        const val TRACK_MAX_INTERVAL_MS = 20_000L
+        const val TRACK_MIN_DISTANCE_M = 12.0
     }
 }

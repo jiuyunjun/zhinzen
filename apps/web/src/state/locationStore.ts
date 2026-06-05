@@ -1,4 +1,5 @@
 import type { LiveLocation } from '@zhinzen/shared-types';
+import { calculateDistance } from '@zhinzen/geo-utils';
 import { create } from 'zustand';
 
 import { writeLiveLocation } from '../lib/locationApi';
@@ -27,12 +28,19 @@ interface LocationState {
 }
 
 const MIN_UPLOAD_INTERVAL_MS = 3000;
-const MIN_TRACK_INTERVAL_MS = 12000;
+// Adaptive track sampling: record once moved >= MIN distance (so faster motion
+// yields denser points), with a MAX-interval heartbeat when still, throttled to
+// a MIN interval so we never spam.
+const TRACK_MIN_INTERVAL_MS = 2500;
+const TRACK_MAX_INTERVAL_MS = 20000;
+const TRACK_MIN_DISTANCE_M = 12;
 
 let watchId: number | null = null;
 let activeInput: StartSharingInput | null = null;
 let lastUploadAt = 0;
 let lastTrackAt = 0;
+let lastTrackLat: number | null = null;
+let lastTrackLng: number | null = null;
 
 function positionToLiveLocation(
   position: GeolocationPosition,
@@ -75,8 +83,18 @@ async function publishLocation(
     await writeLiveLocation(active.roomId, liveLocation);
   }
 
-  if (now - lastTrackAt >= MIN_TRACK_INTERVAL_MS) {
+  const trackElapsed = now - lastTrackAt;
+  const movedMeters =
+    lastTrackLat !== null && lastTrackLng !== null
+      ? calculateDistance({ lat: lastTrackLat, lng: lastTrackLng }, liveLocation)
+      : Infinity;
+  if (
+    (trackElapsed >= TRACK_MIN_INTERVAL_MS && movedMeters >= TRACK_MIN_DISTANCE_M) ||
+    trackElapsed >= TRACK_MAX_INTERVAL_MS
+  ) {
     lastTrackAt = now;
+    lastTrackLat = liveLocation.lat;
+    lastTrackLng = liveLocation.lng;
     void appendTrackPoint({
       roomId: active.roomId,
       deviceId: active.deviceId,
@@ -123,6 +141,8 @@ export const useLocationStore = create<LocationState>((set, get) => ({
     activeInput = input;
     lastUploadAt = 0;
     lastTrackAt = 0;
+    lastTrackLat = null;
+    lastTrackLng = null;
     set({ status: 'requesting', permission: await readPermission(), error: null });
 
     return new Promise<boolean>((resolve) => {

@@ -5,6 +5,25 @@
 
 ---
 
+## 2026-06-05 — 安卓返回手势回房间页 + 自适应轨迹采样（web + android）✅
+
+**1) 安卓地图页返回手势**
+- `ZhinzenApp` 加 `BackHandler(enabled = phase==Map)`：先关闭打开的成员详情,否则
+  `leaveRoom()` 回到房间页,不再直接退出 App。
+
+**2) 自适应轨迹采样（修高速时轨迹偏离实际路线）**
+- 原来固定每 12s 采一个轨迹点 → 高速时点间隔太大,折线切角偏离真实路线。
+- 改为**按距离 + 时间**采样:移动 ≥12m 即采点(速度越快越密),静止时每 20s 心跳一次,
+  最短间隔 2.5s 防刷。两端一致:
+  - android `AppViewModel`：用 `Geo.distanceMeters` 判断;常量 TRACK_MIN_INTERVAL=2.5s /
+    MAX=20s / MIN_DISTANCE=12m。
+  - web `locationStore`：用 `calculateDistance`;同样阈值。
+- 注:轨迹密度也受定位更新频率限制(android fused 3s/1s;web watchPosition)。
+
+**验证**：android `assembleDebug` ✅；web `npm run build` ✅。**web 未重新部署**。
+
+---
+
 ## 2026-06-05 — 震动反馈 + heading-up 平滑 + 轨迹配色阈值（web + android）✅
 
 **1) heading-up 卡顿**
