@@ -16,6 +16,11 @@ build/
 .env.*
 !.env.example
 
+# android secrets (also covered by apps/android/.gitignore)
+local.properties
+google-services.json
+!local.properties.example
+
 # firebase
 .firebase/
 firebase-debug.log

@@ -1,0 +1,10 @@
+# Copy to local.properties (gitignored) and fill in real values.
+# See docs/SECRETS.md.
+
+# Android SDK path — machine-specific (Android Studio sets this for you).
+sdk.dir=/path/to/Android/Sdk
+
+# Maps SDK for Android key → injected into AndroidManifest's geo.API_KEY.
+# Enable "Maps SDK for Android" on this key's GCP project. If the key is
+# app-restricted, allow package com.lazydoglab.zhinzen + your debug SHA-1.
+MAPS_API_KEY=
