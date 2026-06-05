@@ -101,12 +101,17 @@ fun MapScreen(
 ) {
     val permissions =
         rememberMultiplePermissionsState(
-            listOf(
-                android.Manifest.permission.ACCESS_FINE_LOCATION,
-                android.Manifest.permission.ACCESS_COARSE_LOCATION,
-            ),
+            buildList {
+                add(android.Manifest.permission.ACCESS_FINE_LOCATION)
+                add(android.Manifest.permission.ACCESS_COARSE_LOCATION)
+                // Notification permission so the background-sharing notification shows.
+                if (android.os.Build.VERSION.SDK_INT >= 33) {
+                    add(android.Manifest.permission.POST_NOTIFICATIONS)
+                }
+            },
         )
-    val granted = permissions.permissions.any { it.status.isGranted }
+    val granted =
+        permissions.permissions.any { it.permission.endsWith("LOCATION") && it.status.isGranted }
 
     LaunchedEffect(granted) {
         if (granted) onPermissionGranted()

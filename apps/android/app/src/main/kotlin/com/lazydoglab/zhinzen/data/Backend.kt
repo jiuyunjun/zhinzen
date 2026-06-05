@@ -25,32 +25,39 @@ object Backend {
         functions
     }
 
-    private fun payload(identity: DeviceIdentity, sharing: Boolean): HashMap<String, Any?> =
+    private fun payload(
+        identity: DeviceIdentity,
+        sharing: Boolean,
+        capabilities: Map<String, Any>,
+    ): HashMap<String, Any?> =
         hashMapOf(
             "deviceId" to identity.deviceId,
             "deviceSecret" to identity.deviceSecret,
             "displayName" to identity.displayName,
             "platform" to "android",
             "sharingLocation" to sharing,
-            "capabilities" to
-                hashMapOf(
-                    "location" to true,
-                    "imu" to true,
-                    "compass" to true,
-                    "uwb" to false,
-                    "ble" to false,
-                ),
+            "capabilities" to capabilities,
         )
 
     /** Create a room via the createRoom callable; returns the new roomId. */
-    suspend fun createRoom(identity: DeviceIdentity, sharing: Boolean): String {
-        val result = functions.getHttpsCallable("createRoom").call(payload(identity, sharing)).await()
+    suspend fun createRoom(
+        identity: DeviceIdentity,
+        sharing: Boolean,
+        capabilities: Map<String, Any>,
+    ): String {
+        val result =
+            functions.getHttpsCallable("createRoom").call(payload(identity, sharing, capabilities)).await()
         return roomIdFrom(result.getData())
     }
 
     /** Join an existing room via the joinRoom callable; returns the roomId. */
-    suspend fun joinRoom(identity: DeviceIdentity, roomId: String, sharing: Boolean): String {
-        val data = payload(identity, sharing).apply { put("roomId", roomId) }
+    suspend fun joinRoom(
+        identity: DeviceIdentity,
+        roomId: String,
+        sharing: Boolean,
+        capabilities: Map<String, Any>,
+    ): String {
+        val data = payload(identity, sharing, capabilities).apply { put("roomId", roomId) }
         val result = functions.getHttpsCallable("joinRoom").call(data).await()
         return roomIdFrom(result.getData())
     }

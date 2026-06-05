@@ -5,6 +5,32 @@
 
 ---
 
+## 2026-06-05 — Android：后台持续定位（前台服务）+ UWB/BLE 能力检测 ✅（已编译）
+
+**1) 后台持续共享位置（前台服务）**
+- 新增 `service/LocationSharingService`（`foregroundServiceType=location`）：独立持有 Fused
+  定位采集 + 实时位置(RTDB)/自适应轨迹(Functions)上传 + 常驻通知「正在共享你的位置」。
+- 重构：`AppViewModel` 不再自行采集定位,改为 `startLocation()`/`stopLocation()` 启停服务;
+  `ownLocation` 由成员实时回显推导(`rebuildMembers` 里取 self 的 location)。共享开关/进房/
+  离开都对应启停服务。
+- 权限：manifest 增 `ACCESS_BACKGROUND_LOCATION`、`FOREGROUND_SERVICE`、
+  `FOREGROUND_SERVICE_LOCATION`、`POST_NOTIFICATIONS`;地图权限请求里加通知权限(API33+)。
+- 机制：在前台启动服务 → 适用前台服务定位豁免;「始终允许」后台定位可长时间后台跑。
+  从地图按返回(销毁)会停服务;按 Home 退后台 ViewModel 存活 → 服务继续。
+
+**2) UWB/BLE 能力检测**
+- 新增 `util/DeviceCapabilities.detect()`:UWB(`android.hardware.uwb` + Android 12+)、
+  BLE(`FEATURE_BLUETOOTH_LE`) 真实检测,写入成员 `capabilities`(之前安卓硬编码 false)。
+  `Backend.createRoom/joinRoom` 改为接收 capabilities;网页的 UWB/蓝牙能力标签据此显示。
+
+**近距离 UWB/蓝牙测距：尚未实现**(大子系统、需双机真机)。方案已写入 `design.md §8.4`:
+OOB 信令(RTDB)交换 UWB 地址/BLE 标识 → UWB `androidx.core.uwb` ranging / BLE RSSI 粗距桶。
+
+**验证**：`./gradlew assembleDebug` BUILD SUCCESSFUL。⚠️ 后台/通知/能力均需**真机**验证。
+文档已同步:`design.md §8.4`、`README` 阶段表。
+
+---
+
 ## 2026-06-05 — 安卓返回手势回房间页 + 自适应轨迹采样（web + android）✅
 
 **1) 安卓地图页返回手势**

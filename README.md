@@ -70,5 +70,6 @@ npm run typecheck    # 全仓库类型检查
 | Phase 2 | 实时位置（权限、上传、监听、地图显示、在线状态） | ⬜ |
 | Phase 3 | 轨迹与导航（记录/显示轨迹、Google Maps 导航、过期提示） | ⬜ |
 | Phase 4 | 方向指针（罗盘/IMU、方位角、距离、传感器降级） | ⬜ |
-| Phase 5 | Android App（Kotlin + Compose）—— UI 骨架已起步 | 🟡 进行中 |
-| Phase 6+ | UWB / 蓝牙、iOS 移植 | ⬜ |
+| Phase 5 | Android App（Kotlin + Compose）—— 功能已对齐 Web，含后台定位前台服务 | ✅ 大体完成 |
+| Phase 6 | 近距离 UWB / 蓝牙测距（已做能力检测，测距待实现） | 🟡 进行中 |
+| Phase 7 | iOS 移植 | ⬜ |

@@ -944,6 +944,33 @@ FOREGROUND_SERVICE_LOCATION
 
 ---
 
+### 8.4 实现状态（截至当前）
+
+已实现（`apps/android`，Kotlin + Jetpack Compose）：
+
+1. 姓名输入、创建/加入房间（复用 asia-northeast1 的 Cloud Functions）、Google 地图、
+   成员列表/详情、距离、Google 导航、罗盘方向指针、改名、历史房间、共享开关、
+   查看所有人、track 取景、按速度渐变的彩色轨迹、地图旋转 + 指南针(heading-up)、
+   自适应轨迹采样、震动反馈、edge-to-edge。
+2. **后台持续共享位置**：前台服务 `LocationSharingService`（`foregroundServiceType=location`），
+   独立持有 Fused 定位采集 + 实时位置(RTDB)/轨迹(Functions)上传 + 常驻通知；在前台启动以
+   适用「前台服务定位豁免」，配合系统「始终允许」后台定位可长时间后台运行。VM 不再自行采集，
+   `ownLocation` 由成员实时数据回显推导。
+3. **能力检测**：UWB（`android.hardware.uwb` + Android 12+）、BLE（`FEATURE_BLUETOOTH_LE`）
+   真实检测并写入成员 `capabilities`，跨端可见（网页能力标签据此显示）。
+
+近距离 UWB / 蓝牙测距（**计划，尚未实现**）：
+
+1. 触发条件：双方同房间、彼此 `capabilities` 支持、距离足够近（先用 GPS 距离粗判）。
+2. 带外协商（OOB）：通过现有后端做信令（如 RTDB `rooms/{roomId}/nearby/{deviceId}`）
+   交换 UWB 地址/会话参数或 BLE 标识。
+3. UWB：`androidx.core.uwb`（alpha）建立 ranging session → 精准相对距离/方向；仅双方都支持时。
+4. BLE fallback：广播房间内标识 + 扫描，RSSI → 粗略距离桶（很近/较近/较远/信号弱），
+   不展示精确米数（见 §5.8）。
+5. 权限：`BLUETOOTH_SCAN/CONNECT/ADVERTISE`、`UWB_RANGING` 按需、仅在设备支持时请求。
+
+---
+
 ## 9. UI 风格
 
 ### 9.1 设计方向

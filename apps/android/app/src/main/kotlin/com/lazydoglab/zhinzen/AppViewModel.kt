@@ -14,7 +14,6 @@ import com.google.firebase.database.DatabaseReference
 import com.google.firebase.database.ValueEventListener
 import com.google.firebase.firestore.ListenerRegistration
 import com.lazydoglab.zhinzen.data.Backend
-import com.lazydoglab.zhinzen.data.Geo
 import com.lazydoglab.zhinzen.data.LiveLocation
 import com.lazydoglab.zhinzen.data.MemberStatus
 import com.lazydoglab.zhinzen.data.MemberView
@@ -28,9 +27,10 @@ import com.lazydoglab.zhinzen.device.DeviceIdentity
 import com.lazydoglab.zhinzen.device.DeviceIdentityStore
 import com.lazydoglab.zhinzen.location.LocationController
 import com.lazydoglab.zhinzen.sensor.CompassController
+import com.lazydoglab.zhinzen.service.LocationSharingService
+import com.lazydoglab.zhinzen.util.DeviceCapabilities
 import com.lazydoglab.zhinzen.util.Haptics
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
 enum class Phase { Onboarding, Room, Map }
@@ -47,6 +47,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val compassController = CompassController(application)
     private val roomHistoryStore = RoomHistory(application)
     private val haptics = Haptics(application)
+    private val capabilities = DeviceCapabilities.detect(application)
 
     val deviceId: String = identity.deviceId
 
@@ -85,12 +86,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private var membersReg: ListenerRegistration? = null
     private var liveRef: DatabaseReference? = null
     private var liveListener: ValueEventListener? = null
-    private var locationJob: Job? = null
     private var compassJob: Job? = null
-    private var lastUploadAt = 0L
-    private var lastTrackAt = 0L
-    private var lastTrackLat: Double? = null
-    private var lastTrackLng: Double? = null
 
     private fun currentIdentity(): DeviceIdentity = identity.copy(displayName = displayName)
 
@@ -115,7 +111,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         ownLocation = ownLocation?.copy(displayName = trimmed)
         val rid = roomId ?: return
         viewModelScope.launch {
-            runCatching { Backend.joinRoom(currentIdentity(), rid, sharing) }
+            runCatching { Backend.joinRoom(currentIdentity(), rid, sharing, capabilities) }
         }
     }
 
@@ -175,7 +171,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             busy = true
             errorMessage = null
             try {
-                enterRoom(Backend.createRoom(currentIdentity(), sharing))
+                enterRoom(Backend.createRoom(currentIdentity(), sharing, capabilities))
                 haptics.success()
             } catch (e: Exception) {
                 errorMessage = e.message ?: "创建房间失败"
@@ -198,7 +194,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             busy = true
             errorMessage = null
             try {
-                enterRoom(Backend.joinRoom(currentIdentity(), parsed, sharing))
+                enterRoom(Backend.joinRoom(currentIdentity(), parsed, sharing, capabilities))
                 haptics.success()
             } catch (e: Exception) {
                 errorMessage = e.message ?: "加入房间失败"
@@ -322,61 +318,23 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 )
         members.clear()
         members.addAll(views)
+        // ownLocation comes from our own RTDB echo (the foreground service uploads it).
+        views.firstOrNull { it.isSelf }?.location?.let { ownLocation = it }
         if (selectedDeviceId != null && views.none { it.member.deviceId == selectedDeviceId }) {
             selectMember(null)
         }
     }
 
+    // Location is driven by a foreground service so it keeps running in the
+    // background. ownLocation is derived from the members feed (RTDB echo).
     private fun startLocation() {
-        if (locationJob != null) return
-        locationJob =
-            viewModelScope.launch {
-                locationController.updates().collectLatest { loc ->
-                    val live =
-                        LiveLocation(
-                            deviceId = deviceId,
-                            displayName = displayName,
-                            lat = loc.latitude,
-                            lng = loc.longitude,
-                            accuracy = loc.accuracy.toDouble(),
-                            heading = if (loc.hasBearing()) loc.bearing.toDouble() else null,
-                            speed = if (loc.hasSpeed()) loc.speed.toDouble() else 0.0,
-                            updatedAt = System.currentTimeMillis(),
-                            sharingLocation = true,
-                        )
-                    ownLocation = live
-                    val rid = roomId ?: return@collectLatest
-                    val now = System.currentTimeMillis()
-                    if (now - lastUploadAt >= 3000L) {
-                        lastUploadAt = now
-                        Backend.database.getReference("liveLocations/$rid/$deviceId").setValue(live)
-                    }
-                    // Adaptive track sampling: record once we've moved enough (so
-                    // fast motion yields denser points and fewer corner-cutting gaps),
-                    // with a heartbeat when still, throttled to a minimum interval.
-                    val elapsed = now - lastTrackAt
-                    val movedEnough =
-                        lastTrackLat?.let {
-                            Geo.distanceMeters(it, lastTrackLng ?: 0.0, live.lat, live.lng) >= TRACK_MIN_DISTANCE_M
-                        } ?: true
-                    if ((elapsed >= TRACK_MIN_INTERVAL_MS && movedEnough) || elapsed >= TRACK_MAX_INTERVAL_MS) {
-                        lastTrackAt = now
-                        lastTrackLat = live.lat
-                        lastTrackLng = live.lng
-                        val identity = currentIdentity()
-                        viewModelScope.launch { runCatching { Backend.appendTrackPoint(identity, rid, live) } }
-                    }
-                }
-            }
+        val rid = roomId ?: return
+        if (!locationController.hasPermission()) return
+        LocationSharingService.start(getApplication(), rid)
     }
 
     private fun stopLocation() {
-        locationJob?.cancel()
-        locationJob = null
-        lastUploadAt = 0L
-        lastTrackAt = 0L
-        lastTrackLat = null
-        lastTrackLng = null
+        LocationSharingService.stop(getApplication())
     }
 
     override fun onCleared() {
@@ -384,11 +342,5 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         stopLocation()
         stopCompass()
         super.onCleared()
-    }
-
-    private companion object {
-        const val TRACK_MIN_INTERVAL_MS = 2_500L
-        const val TRACK_MAX_INTERVAL_MS = 20_000L
-        const val TRACK_MIN_DISTANCE_M = 12.0
     }
 }
