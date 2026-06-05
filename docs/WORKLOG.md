@@ -5,6 +5,33 @@
 
 ---
 
+## 2026-06-05 — 修复：在线状态用 RTDB onDisconnect + 通知图标（web 已部署）✅
+
+**问题**
+1. 杀掉 App / 关掉网页后,对方仍显示「在线」(最多约 60s 后才因位置过期变灰)。根因:没有
+   断连检测,成员 `online`(Firestore)创建后从不复位,且 60s 内实时位置看起来仍新鲜。
+2. 安卓前台服务**没有常驻通知**:小图标用了多色 launcher 矢量(不是合法通知小图标),
+   且通知权限可能未授予。
+
+**修复**
+- **RTDB 在线状态(presence / onDisconnect)**:连接断开(杀进程/断网/关标签页)时,服务端
+  自动把 `liveLocations/{roomId}/{deviceId}.sharingLocation` 置 false → 对方立刻看到「未共享」
+  而非在线。监听 `.info/connected`,每次(重)连都重新 arm onDisconnect。
+  - web:`locationApi.setupPresence()`,在 `locationStore` 开始共享时 arm、停止时 cancel。
+  - android:`LocationSharingService.setupPresence()`,onStartCommand 里 arm。
+- **通知图标**:新增白色单色 `ic_notification.xml`(地图针轮廓),服务改用它;地图权限请求
+  已含 `POST_NOTIFICATIONS`(API33+),需用户允许通知才能看到常驻通知。
+
+**说明 / 后续**
+- Firestore 的 `member.online` 仍不会自动复位,但状态现在以实时位置的 `sharingLocation`
+  为准(onDisconnect → false → 未共享),不会再误显示在线。更彻底的做法:用 Cloud Function
+  监听 RTDB onDisconnect 同步 Firestore online=false(留待后续)。
+
+**验证**:android `assembleDebug` ✅;web `build` ✅,**已 `firebase deploy --only hosting`**。
+真机/多端验证:杀 App 后对方应在 1–2s 内变灰。
+
+---
+
 ## 2026-06-05 — Android：后台持续定位（前台服务）+ UWB/BLE 能力检测 ✅（已编译）
 
 **1) 后台持续共享位置（前台服务）**

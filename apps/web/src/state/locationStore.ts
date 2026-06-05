@@ -2,7 +2,7 @@ import type { LiveLocation } from '@zhinzen/shared-types';
 import { calculateDistance } from '@zhinzen/geo-utils';
 import { create } from 'zustand';
 
-import { writeLiveLocation } from '../lib/locationApi';
+import { setupPresence, writeLiveLocation } from '../lib/locationApi';
 import { appendTrackPoint } from '../lib/trackApi';
 
 type LocationPermissionState = 'unknown' | 'prompt' | 'granted' | 'denied';
@@ -41,6 +41,7 @@ let lastUploadAt = 0;
 let lastTrackAt = 0;
 let lastTrackLat: number | null = null;
 let lastTrackLng: number | null = null;
+let cancelPresence: (() => void) | null = null;
 
 function positionToLiveLocation(
   position: GeolocationPosition,
@@ -143,6 +144,8 @@ export const useLocationStore = create<LocationState>((set, get) => ({
     lastTrackAt = 0;
     lastTrackLat = null;
     lastTrackLng = null;
+    cancelPresence?.();
+    cancelPresence = setupPresence(input.roomId, input.deviceId);
     set({ status: 'requesting', permission: await readPermission(), error: null });
 
     return new Promise<boolean>((resolve) => {
@@ -218,6 +221,8 @@ export const useLocationStore = create<LocationState>((set, get) => ({
       navigator.geolocation.clearWatch(watchId);
       watchId = null;
     }
+    cancelPresence?.();
+    cancelPresence = null;
 
     const active = activeInput;
     const current = get().current;

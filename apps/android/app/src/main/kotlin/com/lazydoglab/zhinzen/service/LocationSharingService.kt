@@ -21,6 +21,9 @@ import com.google.android.gms.location.LocationRequest
 import com.google.android.gms.location.LocationResult
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
+import com.google.firebase.database.DataSnapshot
+import com.google.firebase.database.DatabaseError
+import com.google.firebase.database.ValueEventListener
 import com.lazydoglab.zhinzen.MainActivity
 import com.lazydoglab.zhinzen.R
 import com.lazydoglab.zhinzen.data.Backend
@@ -71,8 +74,29 @@ class LocationSharingService : Service() {
         }
         roomId = rid
         startForegroundCompat()
+        setupPresence(rid, identityStore.loadOrCreate().deviceId)
         startUpdates()
         return START_STICKY
+    }
+
+    /**
+     * RTDB presence: re-arm an onDisconnect that flips our live location to
+     * not-sharing whenever the connection drops (app killed / network lost), so
+     * peers stop seeing us as online almost immediately.
+     */
+    private fun setupPresence(rid: String, deviceId: String) {
+        val liveRef = Backend.database.getReference("liveLocations/$rid/$deviceId")
+        Backend.database.getReference(".info/connected").addValueEventListener(
+            object : ValueEventListener {
+                override fun onDataChange(snapshot: DataSnapshot) {
+                    if (snapshot.getValue(Boolean::class.java) == true) {
+                        liveRef.child("sharingLocation").onDisconnect().setValue(false)
+                    }
+                }
+
+                override fun onCancelled(error: DatabaseError) {}
+            },
+        )
     }
 
     @SuppressLint("MissingPermission")
@@ -130,7 +154,7 @@ class LocationSharingService : Service() {
             NotificationCompat.Builder(this, CHANNEL_ID)
                 .setContentTitle(getString(R.string.app_name))
                 .setContentText(getString(R.string.sharing_notification))
-                .setSmallIcon(R.drawable.ic_launcher)
+                .setSmallIcon(R.drawable.ic_notification)
                 .setOngoing(true)
                 .setContentIntent(openApp)
                 .build()
