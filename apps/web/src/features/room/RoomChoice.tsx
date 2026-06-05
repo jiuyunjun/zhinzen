@@ -282,21 +282,25 @@ export function RoomChoice({ onEnterRoom }: { onEnterRoom: () => void }) {
                       fontFamily: 'inherit',
                     }}
                   >
-                    <div
-                      style={{
-                        width: 36,
-                        height: 36,
-                        borderRadius: 11,
-                        background: withAlpha(tokens.target, 0.14),
-                        color: tokens.target,
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        flexShrink: 0,
-                      }}
-                    >
-                      <Icon name="people" size={18} />
-                    </div>
+                    {entry.members && entry.members.length > 0 ? (
+                      <MemberAvatars names={entry.members} />
+                    ) : (
+                      <div
+                        style={{
+                          width: 36,
+                          height: 36,
+                          borderRadius: 11,
+                          background: withAlpha(tokens.target, 0.14),
+                          color: tokens.target,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          flexShrink: 0,
+                        }}
+                      >
+                        <Icon name="people" size={18} />
+                      </div>
+                    )}
                     <div style={{ minWidth: 0, flex: 1 }}>
                       <div
                         style={{
@@ -343,6 +347,43 @@ export function RoomChoice({ onEnterRoom }: { onEnterRoom: () => void }) {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+/** Overlapping initial avatars of members seen in a room (history preview). */
+function MemberAvatars({ names }: { names: string[] }) {
+  const shown = names.slice(0, 4);
+  const extra = names.length - shown.length;
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+      {shown.map((name, i) => (
+        <div
+          key={`${name}-${i}`}
+          style={{
+            width: 30,
+            height: 30,
+            borderRadius: '50%',
+            background: tokens.target,
+            color: '#fff',
+            border: '2px solid #fff',
+            marginLeft: i === 0 ? 0 : -9,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: 12.5,
+            fontWeight: 700,
+            flexShrink: 0,
+          }}
+        >
+          {(name || '?').slice(0, 1).toUpperCase()}
+        </div>
+      ))}
+      {extra > 0 && (
+        <div style={{ marginLeft: 5, fontSize: 12, color: tokens.inkFaint, fontWeight: 600 }}>
+          +{extra}
+        </div>
+      )}
     </div>
   );
 }

@@ -13,6 +13,7 @@ import { LangToggle } from '../../components/LangToggle';
 import { isMapRotatable } from '../../lib/env';
 import { haptics } from '../../lib/haptics';
 import { formatRoomCode, inviteLink } from '../../lib/roomCode';
+import { updateRoomMembers } from '../../lib/roomHistory';
 import { fetchRecentTrackPoints } from '../../lib/trackApi';
 import { GoogleMapView } from './GoogleMapView';
 import { MemberDetailPanel } from './MemberDetailPanel';
@@ -77,6 +78,19 @@ export function MapScreen({ onLeave }: { onLeave: () => void }) {
     watchMembers(roomId, deviceId);
     return () => stopWatchingMembers();
   }, [deviceId, roomId, stopWatchingMembers, watchMembers]);
+
+  // Capture member names for the room-history avatar previews.
+  const memberNamesKey = members.map((m) => m.member.displayName).join('');
+  useEffect(() => {
+    if (!roomId || members.length === 0) return;
+    updateRoomMembers(
+      roomId,
+      members.map((m) => m.member.displayName || '?'),
+    );
+    // memberNamesKey collapses the member list to a stable string so we only
+    // write when names actually change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roomId, memberNamesKey]);
 
   useEffect(() => {
     if (!roomId) return;

@@ -5,6 +5,18 @@
 
 ---
 
+## 2026-06-05 — 网页历史房间也显示成员头像（已部署）✅
+
+- 对齐安卓:`lib/roomHistory` 的 `RoomHistoryEntry` 增 `members?: string[]`;`addRoomToHistory`
+  保留旧成员、新增 `updateRoomMembers(roomId, names)`;`read` 兼容旧数据。
+- `MapScreen` 加 effect:成员名集合变化时 `updateRoomMembers`(用 join 字符串 key 防抖)。
+- `RoomChoice` 历史条目:有成员时显示**重叠首字母圆头像**(最多 4 个 +N),否则回退 people 图标。
+- **已 `firebase deploy --only hosting`**。
+
+**验证**：`npm run build` ✅ 已部署。
+
+---
+
 ## 2026-06-05 — 重新实现 BLE 方向箭头（去趋势 detrend，修指反）✅（已编译）
 
 - 之前去掉是因为"按朝向分桶 RSSI"被距离变化主导 → 指反。本次**保留并修好**:
