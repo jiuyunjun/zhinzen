@@ -29,6 +29,8 @@ import com.lazydoglab.zhinzen.location.LocationController
 import com.lazydoglab.zhinzen.nearby.BleRangingController
 import com.lazydoglab.zhinzen.nearby.NearbyEstimate
 import com.lazydoglab.zhinzen.nearby.NearbyEstimator
+import com.lazydoglab.zhinzen.nearby.UwbRangingController
+import com.lazydoglab.zhinzen.nearby.UwbResult
 import com.lazydoglab.zhinzen.sensor.CompassController
 import com.lazydoglab.zhinzen.service.LocationSharingService
 import com.lazydoglab.zhinzen.util.DeviceCapabilities
@@ -52,7 +54,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val haptics = Haptics(application)
     private val capabilities = DeviceCapabilities.detect(application)
     private val bleController = BleRangingController(application)
-    private val nearbyEstimator = NearbyEstimator()
+    private val uwbController = UwbRangingController(application)
+    private val estimators = mutableMapOf<String, NearbyEstimator>()
 
     val deviceId: String = identity.deviceId
 
@@ -83,10 +86,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     /** Recent track points of the currently selected (other) member. */
     var trackPoints by mutableStateOf<List<TrackPoint>>(emptyList())
         private set
-    /** Near-distance estimate (BLE + compass) for the selected member. */
-    var nearbyEstimate by mutableStateOf<NearbyEstimate?>(null)
+    /** Near-distance estimate (BLE + compass) per nearby member deviceId. */
+    var nearbyEstimates by mutableStateOf<Map<String, NearbyEstimate>>(emptyMap())
         private set
-    /** True while BLE advertising/scanning is active for the current selection. */
+    /** Precise UWB ranging for the selected member, when both support UWB. */
+    var nearbyUwb by mutableStateOf<UwbResult?>(null)
+        private set
+    /** True while BLE advertising/scanning is active (continuous while in a room). */
     var nearbyScanning by mutableStateOf(false)
         private set
 
@@ -131,34 +137,57 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         if (deviceId != null && deviceId != this.deviceId) {
             haptics.light()
             fetchTrack(deviceId)
-            startNearby()
+            startUwb(deviceId)
         } else {
             trackPoints = emptyList()
-            stopNearby()
+            stopUwb()
         }
         updateCompass()
     }
 
+    /**
+     * Continuous BLE advertise + scan while in a room, so nearby members are
+     * detected automatically (no need to open anyone's detail). Idempotent.
+     */
     private fun startNearby() {
+        if (nearbyScanning) return
         if (!bleController.isSupported() || !bleController.hasPermission()) return
-        nearbyEstimator.reset()
-        nearbyEstimate = null
         nearbyScanning =
             bleController.start(deviceId) { token, rssi ->
                 viewModelScope.launch {
-                    // Only fuse readings from the member we're currently finding.
-                    val sel = selectedDeviceId ?: return@launch
-                    if (BleRangingController.tokenInt(sel) == token) {
-                        nearbyEstimate = nearbyEstimator.onSample(rssi, deviceHeading, System.currentTimeMillis())
-                    }
+                    val match =
+                        members.firstOrNull { !it.isSelf && BleRangingController.tokenInt(it.member.deviceId) == token }
+                            ?: return@launch
+                    val id = match.member.deviceId
+                    val estimator = estimators.getOrPut(id) { NearbyEstimator() }
+                    nearbyEstimates =
+                        nearbyEstimates + (id to estimator.onSample(rssi, deviceHeading, System.currentTimeMillis()))
                 }
             }
     }
 
     private fun stopNearby() {
         bleController.stop()
-        nearbyEstimate = null
+        estimators.clear()
+        nearbyEstimates = emptyMap()
         nearbyScanning = false
+    }
+
+    /** Precise UWB ranging for the selected peer (only if both support UWB). */
+    private fun startUwb(peerId: String) {
+        val rid = roomId ?: return
+        if (capabilities["uwb"] != true) return
+        if (!uwbController.isSupported() || !uwbController.hasPermission()) return
+        val peer = members.firstOrNull { it.member.deviceId == peerId } ?: return
+        if (!peer.member.capabilities.uwb) return
+        uwbController.start(rid, deviceId, peerId) { result ->
+            viewModelScope.launch { nearbyUwb = result }
+        }
+    }
+
+    private fun stopUwb() {
+        uwbController.stop()
+        nearbyUwb = null
     }
 
     fun toggleHeadingUp() {
@@ -247,6 +276,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         stopLocation()
         stopCompass()
         stopNearby()
+        stopUwb()
         roomId = null
         ownLocation = null
         selectedDeviceId = null
@@ -258,6 +288,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     /** Called by the map screen once location permission is granted. */
     fun onLocationPermissionGranted() {
         if (roomId != null && sharing) startLocation()
+        // BLE/notification permissions are requested together; (re)start nearby once granted.
+        startNearby()
     }
 
     /** Pause/resume sharing this device's live location. */
@@ -298,6 +330,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         phase = Phase.Map
         startWatching(id)
         if (locationController.hasPermission()) startLocation()
+        startNearby()
     }
 
     private fun startWatching(roomId: String) {
@@ -378,6 +411,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         stopLocation()
         stopCompass()
         stopNearby()
+        stopUwb()
         super.onCleared()
     }
 }

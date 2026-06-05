@@ -78,4 +78,7 @@ dependencies {
     implementation(libs.play.services.location)
     implementation(libs.kotlinx.coroutines.play.services)
     implementation(libs.accompanist.permissions)
+
+    // UWB precise ranging (near-distance direction/distance on supported devices)
+    implementation("androidx.core.uwb:uwb:1.0.0-alpha08")
 }

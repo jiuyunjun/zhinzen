@@ -83,6 +83,7 @@ import com.lazydoglab.zhinzen.data.MemberView
 import com.lazydoglab.zhinzen.data.RoomCode
 import com.lazydoglab.zhinzen.nearby.NearbyEstimate
 import com.lazydoglab.zhinzen.nearby.NearbyTrend
+import com.lazydoglab.zhinzen.nearby.UwbResult
 import com.lazydoglab.zhinzen.data.TrackPoint
 import com.lazydoglab.zhinzen.ui.theme.ZzColor
 
@@ -97,7 +98,8 @@ fun MapScreen(
     sharing: Boolean,
     trackPoints: List<TrackPoint>,
     headingUp: Boolean,
-    nearbyEstimate: NearbyEstimate?,
+    nearbyEstimates: Map<String, NearbyEstimate>,
+    nearbyUwb: UwbResult?,
     nearbyScanning: Boolean,
     onLeave: () -> Unit,
     onPermissionGranted: () -> Unit,
@@ -121,6 +123,7 @@ fun MapScreen(
                     add(android.Manifest.permission.BLUETOOTH_SCAN)
                     add(android.Manifest.permission.BLUETOOTH_ADVERTISE)
                     add(android.Manifest.permission.BLUETOOTH_CONNECT)
+                    add(android.Manifest.permission.UWB_RANGING)
                 }
             },
         )
@@ -345,21 +348,26 @@ fun MapScreen(
                     member = selected,
                     selfLocation = selfLocation,
                     deviceHeading = deviceHeading,
-                    estimate = nearbyEstimate,
+                    estimate = nearbyEstimates[selected.member.deviceId],
+                    uwb = nearbyUwb,
                     nearbyScanning = nearbyScanning,
                     onClose = { onSelectMember(null) },
                     onRename = onRename,
                     onLeave = onLeave,
                 )
             } else {
-                MemberStrip(members = members, onSelect = onSelectMember)
+                MemberStrip(
+                    members = members,
+                    nearbyIds = nearbyEstimates.keys,
+                    onSelect = onSelectMember,
+                )
             }
         }
     }
 }
 
 @Composable
-private fun MemberStrip(members: List<MemberView>, onSelect: (String) -> Unit) {
+private fun MemberStrip(members: List<MemberView>, nearbyIds: Set<String>, onSelect: (String) -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -384,6 +392,15 @@ private fun MemberStrip(members: List<MemberView>, onSelect: (String) -> Unit) {
                     fontWeight = FontWeight.Medium,
                     modifier = Modifier.padding(top = 6.dp),
                 )
+                // Auto-detected nearby (BLE) without needing to open the detail.
+                if (!mv.isSelf && nearbyIds.contains(mv.member.deviceId)) {
+                    Text(
+                        text = stringResource(R.string.nearby_badge),
+                        color = ZzColor.Self,
+                        fontSize = 10.5.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
             }
         }
     }
@@ -395,6 +412,7 @@ private fun MemberDetail(
     selfLocation: LiveLocation?,
     deviceHeading: Float?,
     estimate: NearbyEstimate?,
+    uwb: UwbResult?,
     nearbyScanning: Boolean,
     onClose: () -> Unit,
     onRename: (String) -> Unit,
@@ -430,7 +448,7 @@ private fun MemberDetail(
     if (member.isSelf) {
         SelfEditor(member, onRename, onLeave)
     } else {
-        OtherDetail(member, selfLocation, deviceHeading, estimate, nearbyScanning)
+        OtherDetail(member, selfLocation, deviceHeading, estimate, uwb, nearbyScanning)
     }
 }
 
@@ -472,6 +490,7 @@ private fun OtherDetail(
     selfLocation: LiveLocation?,
     deviceHeading: Float?,
     estimate: NearbyEstimate?,
+    uwb: UwbResult?,
     nearbyScanning: Boolean,
 ) {
     val context = LocalContext.current
@@ -548,7 +567,28 @@ private fun OtherDetail(
         )
     }
 
-    if (estimate != null) {
+    if (uwb != null) {
+        Row(
+            modifier = Modifier.padding(top = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            UwbArrow(azimuthDeg = uwb.azimuthDeg)
+            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text(
+                    text = stringResource(R.string.uwb_distance, String.format("%.1f", uwb.distanceMeters)),
+                    color = ZzColor.Target,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+                Text(
+                    text = stringResource(R.string.uwb_precise),
+                    color = ZzColor.InkSoft,
+                    fontSize = 12.sp,
+                )
+            }
+        }
+    } else if (estimate != null) {
         val trendRes =
             when (estimate.trend) {
                 NearbyTrend.CLOSER -> R.string.trend_closer
@@ -560,7 +600,7 @@ private fun OtherDetail(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            NearbyDirection(bestHeadingDeg = estimate.bestHeadingDeg, deviceHeading = deviceHeading)
+            TrendBadge(estimate.trend)
             Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 Text(
                     text = stringResource(rangeRes(estimate.distanceMeters)),
@@ -576,13 +616,6 @@ private fun OtherDetail(
                         fontSize = 12.sp,
                     )
                 }
-                if (estimate.bestHeadingDeg == null) {
-                    Text(
-                        text = stringResource(R.string.nearby_dir_unknown),
-                        color = ZzColor.InkFaint,
-                        fontSize = 11.5.sp,
-                    )
-                }
             }
         }
     } else if (nearbyScanning) {
@@ -595,30 +628,24 @@ private fun OtherDetail(
     }
 }
 
-/** Arrow toward the heading where the BLE signal is strongest (IMU + RSSI). */
+/** Precise UWB bearing arrow (azimuth is a real angle to the peer). */
 @Composable
-private fun NearbyDirection(bestHeadingDeg: Float?, deviceHeading: Float?) {
-    val relative =
-        if (bestHeadingDeg != null && deviceHeading != null) {
-            ((bestHeadingDeg - deviceHeading + 360f) % 360f)
-        } else {
-            null
-        }
+private fun UwbArrow(azimuthDeg: Float?) {
     Box(
         modifier = Modifier
             .size(56.dp)
             .clip(CircleShape)
-            .background(ZzColor.Bg),
+            .background(ZzColor.Target.copy(alpha = 0.14f)),
         contentAlignment = Alignment.Center,
     ) {
-        if (relative == null) {
-            Text(text = "?", color = ZzColor.InkFaint, fontSize = 20.sp)
+        if (azimuthDeg == null) {
+            Text(text = "UWB", color = ZzColor.Target, fontSize = 12.sp, fontWeight = FontWeight.Bold)
         } else {
-            var continuous by remember { mutableStateOf(relative) }
-            LaunchedEffect(relative) {
-                continuous += ((relative - (continuous % 360f) + 540f) % 360f) - 180f
+            var continuous by remember { mutableStateOf(azimuthDeg) }
+            LaunchedEffect(azimuthDeg) {
+                continuous += ((azimuthDeg - (continuous % 360f) + 540f) % 360f) - 180f
             }
-            val angle by animateFloatAsState(targetValue = continuous, label = "nearbyDir")
+            val angle by animateFloatAsState(targetValue = continuous, label = "uwbDir")
             Canvas(modifier = Modifier.size(26.dp).rotate(angle)) {
                 val w = size.width
                 val h = size.height
@@ -629,9 +656,29 @@ private fun NearbyDirection(bestHeadingDeg: Float?, deviceHeading: Float?) {
                     lineTo(w * 0.18f, h)
                     close()
                 }
-                drawPath(path, ZzColor.Self)
+                drawPath(path, ZzColor.Target)
             }
         }
+    }
+}
+
+/** Warmer/colder badge from the BLE RSSI trend (reliable; true direction needs UWB). */
+@Composable
+private fun TrendBadge(trend: NearbyTrend) {
+    val (glyph, tint) =
+        when (trend) {
+            NearbyTrend.CLOSER -> "↑" to ZzColor.Online
+            NearbyTrend.FARTHER -> "↓" to ZzColor.Stale
+            NearbyTrend.STEADY -> "•" to ZzColor.InkFaint
+        }
+    Box(
+        modifier = Modifier
+            .size(56.dp)
+            .clip(CircleShape)
+            .background(tint.copy(alpha = 0.14f)),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(text = glyph, color = tint, fontSize = 26.sp, fontWeight = FontWeight.Bold)
     }
 }
 

@@ -5,6 +5,31 @@
 
 ---
 
+## 2026-06-05 — 连续 BLE 自动发现 + UWB 精准测距/测向 + 去除误导箭头 ✅（已编译）
+
+**1) 去掉误导的 BLE 方向箭头**
+- 之前用"面朝方向分桶 RSSI"估方向,被距离变化污染(走近导致 RSSI 升,与朝向无关)→ 箭头常指反。
+- 单手机 BLE 本就无法测向(无天线阵列)。改为只显示**可靠的部分**:距离区间 + 越来越近/远
+  趋势(TrendBadge ↑/↓/•)。真方向交给 UWB。
+
+**2) BLE 改为连续(自动发现附近的人)**
+- 不再"互点头像才配对"。进房间即**持续广播+扫描**(BALANCED 省电),自动发现附近成员。
+- 每个 peer 一个 `NearbyEstimator`(`Map<deviceId, NearbyEstimate>`);成员条上检测到的人显示
+  「附近」标。`startNearby` 在 enterRoom / 权限授予后调用,幂等;leaveRoom 停。
+
+**3) UWB 精准测距/测向(design §5.7)**
+- 新增 `androidx.core.uwb:uwb:1.0.0-alpha08` + `UWB_RANGING` 权限 + `uses-feature uwb`。
+- `nearby/UwbRangingController`:Android 12+ 且双方 capabilities.uwb 才启;通过 RTDB 带外协商
+  (`rooms/{roomId}/uwb/{pairKey}`,小 deviceId=controller 定 channel/sessionId/key,另一方
+  controlee)交换地址 → `prepareSession` 收 `RangingResult` → 距离(米)+ azimuth(真实方位角)。
+- 选中支持 UWB 的成员时启动;详情显示「UWB · X.X 米 · 精准定位」+ **方位角箭头**(真实方向)。
+  否则回退到 BLE 距离/趋势。leaveRoom/取消选择停。
+
+**验证**：`assembleDebug` ✅(UWB alpha API 一次编过)。⚠️ BLE/UWB 都需真机(UWB 需两台 UWB 机型);
+UWB OOB 节点未清理、握手时序未在真机验证,可能需加固。
+
+---
+
 ## 2026-06-05 — 室内近距离找人：BLE 平滑+粗距离+趋势 + IMU 方向估计 ✅（已编译）
 
 **目标**：5–20m 室内 GPS 不准,改"相对找人"(design §5.7/5.8)。

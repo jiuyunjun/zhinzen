@@ -50,4 +50,7 @@
     <string name="trend_closer">Getting closer ↑</string>
     <string name="trend_farther">Getting farther ↓</string>
     <string name="trend_steady">Steady</string>
+    <string name="nearby_badge">Nearby</string>
+    <string name="uwb_distance">UWB · %1$s m</string>
+    <string name="uwb_precise">Precise (direction calibrated)</string>
 </resources>

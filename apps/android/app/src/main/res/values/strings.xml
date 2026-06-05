@@ -51,4 +51,7 @@
     <string name="trend_closer">正在靠近 ↑</string>
     <string name="trend_farther">正在远离 ↓</string>
     <string name="trend_steady">信号稳定</string>
+    <string name="nearby_badge">附近</string>
+    <string name="uwb_distance">UWB · %1$s 米</string>
+    <string name="uwb_precise">精准定位（方向已校准）</string>
 </resources>

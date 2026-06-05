@@ -62,9 +62,11 @@ class BleRangingController(context: Context) {
         val adv = a.bluetoothLeAdvertiser ?: return false
         val scn = a.bluetoothLeScanner ?: return false
 
+        // Runs continuously while in a room (auto nearby-detection), so use balanced
+        // power rather than low-latency to keep battery cost reasonable.
         val settings =
             AdvertiseSettings.Builder()
-                .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY)
+                .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_BALANCED)
                 .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_HIGH)
                 .setConnectable(false)
                 .build()
