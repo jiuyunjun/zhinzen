@@ -5,6 +5,22 @@
 
 ---
 
+## 2026-06-05 — 修复 Sony 等机型图钉不显示：强制 LEGACY 地图渲染器 ✅（已编译）
+
+**现象**：Sony Android 13 上**地图底图正常,但所有图钉(自己+别人)都不显示**;小米同 APK 正常。
+logcat 有 GMS broker 报错 `Unknown calling package name 'com.google.android.gms'`。
+
+**根因**：Maps SDK 的 **LATEST 渲染器**经 Play 服务下发,在该机(GMS broker 异常)上没正常
+加载 → 瓦片能出、自定义 Bitmap 图钉画不出。
+
+**修复**：`MainActivity` 里 `MapsInitializer.initialize(ctx, Renderer.LEGACY) {}` 强制用
+**LEGACY 渲染器**(打包在 SDK 内,不依赖 Play 服务下发,跨机型稳)。旋转/heading-up/图钉/
+轨迹/定位均支持,仅不支持云端地图样式(本就没用)。需在首个地图创建前调用,故放 onCreate。
+
+**验证**：`assembleDebug` ✅,产物 `app-debug.apk`。需 Sony 真机确认图钉显示。
+
+---
+
 ## 2026-06-05 — 修复安卓地图头像不显示（Sony A13 等）+ BLE 搜索指示 ✅（已编译）
 
 **1) 地图头像不显示**
