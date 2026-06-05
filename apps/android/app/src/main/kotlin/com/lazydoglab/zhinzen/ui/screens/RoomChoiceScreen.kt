@@ -28,6 +28,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.lazydoglab.zhinzen.R
+import com.lazydoglab.zhinzen.data.RoomCode
+import com.lazydoglab.zhinzen.data.RoomHistoryEntry
 import com.lazydoglab.zhinzen.ui.theme.ZzColor
 
 @Composable
@@ -35,8 +37,11 @@ fun RoomChoiceScreen(
     displayName: String,
     busy: Boolean,
     error: String?,
+    history: List<RoomHistoryEntry>,
     onCreate: () -> Unit,
     onJoin: (String) -> Unit,
+    onJoinHistory: (String) -> Unit,
+    onRemoveHistory: (String) -> Unit,
     onClearError: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -112,6 +117,53 @@ fun RoomChoiceScreen(
                 fontSize = 13.sp,
                 modifier = Modifier.padding(top = 14.dp),
             )
+        }
+
+        if (history.isNotEmpty()) {
+            Text(
+                text = stringResource(R.string.recent_rooms),
+                color = ZzColor.InkFaint,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(top = 26.dp, bottom = 8.dp),
+            )
+            history.forEach { entry ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    val shape = RoundedCornerShape(14.dp)
+                    Row(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(shape)
+                            .background(ZzColor.Surface)
+                            .border(1.5.dp, ZzColor.Line, shape)
+                            .clickable(enabled = !busy) { onJoinHistory(entry.roomId) }
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = RoomCode.format(entry.roomId),
+                            color = ZzColor.Ink,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
+                    Text(
+                        text = "✕",
+                        color = ZzColor.InkFaint,
+                        fontSize = 16.sp,
+                        modifier = Modifier
+                            .padding(start = 8.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable { onRemoveHistory(entry.roomId) }
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                    )
+                }
+            }
         }
     }
 }

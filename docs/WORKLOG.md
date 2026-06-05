@@ -5,6 +5,29 @@
 
 ---
 
+## 2026-06-05 — Android：成员列表/详情 + 改名 + 历史房间 + edge-to-edge ✅（已编译）
+
+**做了什么**
+- **edge-to-edge 做好**：`MainActivity.enableEdgeToEdge()` 已开；这次把 Compose 侧 insets
+  处理对：`GoogleMap(contentPadding = WindowInsets.systemBars)`（Google logo/控件不被系统栏
+  遮挡，符合 Maps 条款）、顶部房间码用 `statusBarsPadding()`、底部 sheet 用 `navigationBarsPadding()`。
+- **底部成员条**：横滑成员头像（首字母 + 状态色点），点击选中。
+- **成员详情**（选中替换成员条）：他人 → 距离(Geo haversine) + 最后更新 + Google 地图导航
+  (Intent ACTION_VIEW)；自己 → 改名输入 + 保存 + 离开房间。
+- **改名传播**：`renameInRoom` 改本地 + 立即更新 ownLocation.displayName + best-effort 重新
+  `joinRoom` 刷新成员文档（下次位置上传也带新名字）。
+- **历史房间**：`data/RoomHistory`(SharedPreferences，≤10) + RoomChoice 底部「最近加入」列表，
+  点条目重新加入、✕ 移除；进房间时记录。
+- `data/Geo.kt`：haversine 距离 + 方位角 + 距离格式化（镜像 geo-utils）。
+- 新增 zh/en 文案（recent_rooms / distance / last_updated / navigate / status_*）。
+
+**验证**：`./gradlew assembleDebug` BUILD SUCCESSFUL。仅编译验证，未真机跑。
+
+**未做（下一个 Android 增量）**：罗盘方向指针(SensorManager)、track 模式取景、地图旋转/指南针、
+共享开关 + 轨迹上传/显示、过期导航提示文案对齐 web。
+
+---
+
 ## 2026-06-04 — Phase 5 增量：Android 接 Firebase + 地图 + 实时定位 ✅（已编译）
 
 **做了什么**

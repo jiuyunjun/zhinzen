@@ -22,4 +22,12 @@
     <string name="save">Save</string>
     <string name="location_permission_rationale">Location permission is needed to share your position and show it on the map</string>
     <string name="grant_location">Allow location</string>
+    <string name="recent_rooms">Recent rooms</string>
+    <string name="distance">Distance</string>
+    <string name="last_updated">Last update</string>
+    <string name="navigate">Navigate in Google Maps</string>
+    <string name="status_online">Online</string>
+    <string name="status_stale">Stale</string>
+    <string name="status_offline">Offline</string>
+    <string name="status_not_sharing">Not sharing</string>
 </resources>

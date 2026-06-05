@@ -28,8 +28,11 @@ fun ZhinzenApp(viewModel: AppViewModel = viewModel()) {
                         displayName = viewModel.displayName,
                         busy = viewModel.busy,
                         error = viewModel.errorMessage,
+                        history = viewModel.roomHistory,
                         onCreate = viewModel::createRoom,
                         onJoin = viewModel::joinRoom,
+                        onJoinHistory = viewModel::joinRoom,
+                        onRemoveHistory = viewModel::removeHistory,
                         onClearError = viewModel::clearError,
                     )
 
@@ -38,8 +41,11 @@ fun ZhinzenApp(viewModel: AppViewModel = viewModel()) {
                         roomId = viewModel.roomId,
                         members = viewModel.members,
                         ownLocation = viewModel.ownLocation,
+                        selectedDeviceId = viewModel.selectedDeviceId,
                         onLeave = viewModel::leaveRoom,
                         onPermissionGranted = viewModel::onLocationPermissionGranted,
+                        onSelectMember = viewModel::selectMember,
+                        onRename = viewModel::renameInRoom,
                     )
             }
         }

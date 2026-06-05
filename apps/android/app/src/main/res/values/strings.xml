@@ -23,4 +23,12 @@
     <string name="save">保存</string>
     <string name="location_permission_rationale">需要定位权限来共享你的位置并在地图上显示</string>
     <string name="grant_location">允许定位</string>
+    <string name="recent_rooms">最近加入</string>
+    <string name="distance">距离</string>
+    <string name="last_updated">最后更新</string>
+    <string name="navigate">用 Google 地图导航</string>
+    <string name="status_online">在线</string>
+    <string name="status_stale">位置过期</string>
+    <string name="status_offline">离线</string>
+    <string name="status_not_sharing">未共享</string>
 </resources>

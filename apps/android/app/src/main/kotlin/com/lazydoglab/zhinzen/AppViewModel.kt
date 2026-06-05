@@ -18,6 +18,8 @@ import com.lazydoglab.zhinzen.data.LiveLocation
 import com.lazydoglab.zhinzen.data.MemberStatus
 import com.lazydoglab.zhinzen.data.MemberView
 import com.lazydoglab.zhinzen.data.RoomCode
+import com.lazydoglab.zhinzen.data.RoomHistory
+import com.lazydoglab.zhinzen.data.RoomHistoryEntry
 import com.lazydoglab.zhinzen.data.RoomMember
 import com.lazydoglab.zhinzen.data.deriveStatus
 import com.lazydoglab.zhinzen.device.DeviceIdentity
@@ -38,6 +40,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val identityStore = DeviceIdentityStore(application)
     private val identity = identityStore.loadOrCreate()
     private val locationController = LocationController(application)
+    private val roomHistoryStore = RoomHistory(application)
 
     val deviceId: String = identity.deviceId
 
@@ -54,6 +57,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     var sharing by mutableStateOf(true)
         private set
     var ownLocation by mutableStateOf<LiveLocation?>(null)
+        private set
+    var selectedDeviceId by mutableStateOf<String?>(null)
+        private set
+    var roomHistory by mutableStateOf<List<RoomHistoryEntry>>(roomHistoryStore.list())
         private set
 
     val members: SnapshotStateList<MemberView> = mutableStateListOf()
@@ -78,6 +85,26 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun finishOnboarding(name: String) {
         updateDisplayName(name)
         phase = Phase.Room
+    }
+
+    /** Rename and propagate to the room: re-upsert the member doc + next upload. */
+    fun renameInRoom(name: String) {
+        val trimmed = name.trim()
+        if (trimmed.isEmpty()) return
+        updateDisplayName(trimmed)
+        ownLocation = ownLocation?.copy(displayName = trimmed)
+        val rid = roomId ?: return
+        viewModelScope.launch {
+            runCatching { Backend.joinRoom(currentIdentity(), rid, sharing) }
+        }
+    }
+
+    fun selectMember(deviceId: String?) {
+        selectedDeviceId = deviceId
+    }
+
+    fun removeHistory(roomId: String) {
+        roomHistory = roomHistoryStore.remove(roomId)
     }
 
     fun createRoom() {
@@ -119,6 +146,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         stopLocation()
         roomId = null
         ownLocation = null
+        selectedDeviceId = null
         members.clear()
         phase = Phase.Room
     }
@@ -134,6 +162,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun enterRoom(id: String) {
         roomId = id
+        selectedDeviceId = null
+        roomHistory = roomHistoryStore.add(id)
         phase = Phase.Map
         startWatching(id)
         if (locationController.hasPermission()) startLocation()
@@ -193,6 +223,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 )
         members.clear()
         members.addAll(views)
+        if (selectedDeviceId != null && views.none { it.member.deviceId == selectedDeviceId }) {
+            selectedDeviceId = null
+        }
     }
 
     private fun startLocation() {
