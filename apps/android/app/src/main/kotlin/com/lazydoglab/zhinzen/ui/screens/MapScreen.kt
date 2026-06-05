@@ -1,7 +1,11 @@
 package com.lazydoglab.zhinzen.ui.screens
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Canvas
@@ -153,6 +157,17 @@ fun MapScreen(
     val selected = members.firstOrNull { it.member.deviceId == selectedDeviceId }
     val scope = rememberCoroutineScope()
     val haptic = LocalHapticFeedback.current
+    val context = LocalContext.current
+
+    val copyInvite = {
+        val rid = roomId
+        if (rid != null) {
+            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+            clipboard?.setPrimaryClip(ClipData.newPlainText("Zhinzen", RoomCode.inviteLink(rid)))
+            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+            Toast.makeText(context, context.getString(R.string.copied), Toast.LENGTH_SHORT).show()
+        }
+    }
 
     var showLeaveConfirm by remember { mutableStateOf(false) }
     // System back: close an open member detail first, otherwise confirm leaving.
@@ -270,15 +285,18 @@ fun MapScreen(
             }
         }
 
-        // top: room code + member count
-        Box(
+        // top: room code + member count — tap to copy the invite link
+        Row(
             modifier = Modifier
                 .align(Alignment.TopStart)
                 .statusBarsPadding()
                 .padding(12.dp)
                 .clip(RoundedCornerShape(15.dp))
                 .background(Color(0xE6FFFFFF))
+                .clickable { copyInvite() }
                 .padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Text(
                 text = stringResource(R.string.room_code) + "  " +
@@ -286,6 +304,12 @@ fun MapScreen(
                 color = ZzColor.Ink,
                 fontSize = 14.sp,
                 fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text = stringResource(R.string.copy_invite),
+                color = ZzColor.Self,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
             )
         }
 

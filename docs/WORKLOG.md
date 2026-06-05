@@ -5,6 +5,19 @@
 
 ---
 
+## 2026-06-05 — App 复制邀请链接 + 密钥清单文档 ✅（已编译/已 push）
+
+- **复制邀请链接**:地图顶部"房间码"条改为可点,旁边加「复制邀请」;点按复制
+  `RoomCode.inviteLink(roomId)`(`https://zhinzen.lazydoglab.com/#/r/CODE`)到剪贴板 +
+  震动 + Toast「邀请链接已复制」。和网页一致。
+- **项目管理/密钥**:新增 `docs/SECRETS.md`(列出所有 gitignore 配置文件、来源、要单独备份的)
+  + `apps/android/local.properties.example`;根 `.gitignore` 兜底忽略 local.properties/
+  google-services.json。确认无密钥入库。已 `git push`。
+
+**验证**：`assembleDebug` ✅。
+
+---
+
 ## 2026-06-05 — 网页历史房间也显示成员头像（已部署）✅
 
 - 对齐安卓:`lib/roomHistory` 的 `RoomHistoryEntry` 增 `members?: string[]`;`addRoomToHistory`

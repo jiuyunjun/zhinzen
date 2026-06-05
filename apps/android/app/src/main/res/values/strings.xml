@@ -17,6 +17,8 @@
     <string name="join">加入</string>
     <string name="you">你</string>
     <string name="room_code">房间码</string>
+    <string name="copy_invite">复制邀请</string>
+    <string name="copied">邀请链接已复制</string>
     <string name="leave_room">离开房间</string>
     <string name="cancel">取消</string>
     <string name="leave_confirm_title">离开房间？</string>

@@ -16,6 +16,8 @@
     <string name="join">Join</string>
     <string name="you">You</string>
     <string name="room_code">Room code</string>
+    <string name="copy_invite">Copy invite</string>
+    <string name="copied">Invite link copied</string>
     <string name="leave_room">Leave room</string>
     <string name="cancel">Cancel</string>
     <string name="leave_confirm_title">Leave room?</string>
