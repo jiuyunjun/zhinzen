@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.lazydoglab.zhinzen",
+      "sha256_cert_fingerprints": [
+        "1D:1E:11:47:F9:D0:7D:1D:99:B5:61:0F:44:F0:F8:66:45:8B:41:11:BC:94:A6:CC:CC:96:81:DA:16:C3:A8:B5"
+      ]
+    }
+  }
+]

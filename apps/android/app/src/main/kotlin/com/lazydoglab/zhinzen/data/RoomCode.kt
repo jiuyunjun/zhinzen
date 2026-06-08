@@ -31,5 +31,5 @@ object RoomCode {
         return normalized.ifEmpty { null }
     }
 
-    fun inviteLink(roomId: String): String = "https://zhinzen.lazydoglab.com/#/r/$roomId"
+    fun inviteLink(roomId: String): String = "https://zhinzen.lazydoglab.com/r/$roomId"
 }

@@ -58,6 +58,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val estimators = mutableMapOf<String, NearbyEstimator>()
     private var lastHistoryMembers: List<String> = emptyList()
     private var lastTrackFetchAt = 0L
+    private var pendingInvite: String? = null
 
     val deviceId: String = identity.deviceId
 
@@ -119,6 +120,26 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun finishOnboarding(name: String) {
         updateDisplayName(name)
         phase = Phase.Room
+        // If we arrived via an invite link before having a name, join now.
+        pendingInvite?.let { code ->
+            pendingInvite = null
+            joinRoom(code)
+        }
+    }
+
+    /**
+     * Handle an App Link / invite URL (https://.../r/CODE). Joins immediately if
+     * we have a name and aren't already in that room; otherwise defers until
+     * onboarding finishes.
+     */
+    fun handleDeepLink(uri: String?) {
+        val code = uri?.let { RoomCode.parse(it) } ?: return
+        if (roomId == code) return
+        if (displayName.isBlank()) {
+            pendingInvite = code
+        } else {
+            joinRoom(code)
+        }
     }
 
     /** Rename and propagate to the room: re-upsert the member doc + next upload. */

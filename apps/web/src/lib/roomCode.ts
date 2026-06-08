@@ -29,9 +29,12 @@ export function formatRoomCode(roomId: string): string {
   return (roomId.match(/.{1,4}/g) ?? [roomId]).join('-');
 }
 
-/** Build the shareable invite link for a room code. */
+/**
+ * Build the shareable invite link for a room code. Path-based (`/r/CODE`, not a
+ * `#` fragment) so Android App Links can match and open the app directly.
+ */
 export function inviteLink(roomId: string, origin: string = window.location.origin): string {
-  return `${origin}/#/r/${roomId}`;
+  return `${origin}/r/${roomId}`;
 }
 
 /**
@@ -57,7 +60,7 @@ export function parseRoomInput(input: string): string | null {
   return normalized.length > 0 ? normalized : null;
 }
 
-/** Read a room code from the current URL hash (`#/r/CODE`), if present. */
+/** Read a room code from the current URL — path (`/r/CODE`) or legacy hash (`#/r/CODE`). */
 export function roomFromUrl(): string | null {
-  return parseRoomInput(window.location.hash);
+  return parseRoomInput(window.location.pathname) ?? parseRoomInput(window.location.hash);
 }

@@ -18,7 +18,16 @@
   ],
   "hosting": {
     "public": "apps/web/dist",
-    "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+    "ignore": ["firebase.json", "**/node_modules/**"],
+    "headers": [
+      {
+        "source": "/.well-known/assetlinks.json",
+        "headers": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Cache-Control", "value": "no-cache" }
+        ]
+      }
+    ],
     "rewrites": [{ "source": "**", "destination": "/index.html" }]
   },
   "emulators": {

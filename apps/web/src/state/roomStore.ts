@@ -37,8 +37,9 @@ interface RoomState {
 }
 
 function syncUrl(roomId: string | null): void {
-  const target = roomId ? `#/r/${roomId}` : '#/';
-  if (window.location.hash !== target) {
+  // Path-based (`/r/CODE`) so the shareable URL is an App Link, not a `#` fragment.
+  const target = roomId ? `/r/${roomId}` : '/';
+  if (window.location.pathname !== target) {
     history.replaceState(null, '', target);
   }
 }

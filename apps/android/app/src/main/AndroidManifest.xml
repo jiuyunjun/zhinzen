@@ -51,10 +51,21 @@
             android:name=".MainActivity"
             android:exported="true"
             android:label="@string/app_name"
+            android:launchMode="singleTop"
             android:theme="@style/Theme.Zhinzen">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+            <!-- App Links: verified https invite links (/r/CODE) open the app directly.
+                 Verification uses /.well-known/assetlinks.json on each host. -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" android:host="zhinzen.lazydoglab.com" android:pathPrefix="/r/" />
+                <data android:scheme="https" android:host="zhinzen.web.app" android:pathPrefix="/r/" />
             </intent-filter>
         </activity>
     </application>

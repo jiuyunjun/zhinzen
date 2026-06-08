@@ -62,6 +62,14 @@ MAPS_API_KEY=...   Maps SDK for Android key →（构建时注入 AndroidManifes
 
 ---
 
+## 签名密钥库(App Links / 发版会用到)
+
+- **debug keystore**(`~/.android/debug.keystore`,Android Studio 自动生成):其 SHA-256 已写进
+  `apps/web/public/.well-known/assetlinks.json`,用于 App Links 验证。换电脑会变,需重新生成并更新 assetlinks。
+- **release keystore**(发版用,目前还没有):**这是真正必须单独保管的密钥** —— 丢了就无法给同一个
+  App 发更新。生成后:① keystore 文件 + 口令存密码管理器;② 把它的 SHA-256 追加进 assetlinks.json;
+  ③ keystore 放 gitignored 路径。
+
 ## 真正算"机密"的(目前都没有,但将来要注意)
 
 - **service account JSON**(`serviceAccountKey*.json`):服务端 / Admin SDK / CI 用。已 gitignore。**绝不入库**,只存密码管理器。

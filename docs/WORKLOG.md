@@ -5,6 +5,27 @@
 
 ---
 
+## 2026-06-05 — Android App Links：邀请链接装了就唤起 App,没装走网页 ✅（已部署/已编译）
+
+**目标**:点开 `https://zhinzen.lazydoglab.com/r/CODE`,装了 App → 直接进 App 对应房间;没装 → 网页。
+
+- **邀请链接改 path 式**(`/r/CODE`,不再用 `#` 片段,因为 App Links 不能匹配 fragment):
+  web `inviteLink` / `roomFromUrl`(兼容旧 hash) / `syncUrl`,android `RoomCode.inviteLink`。
+- **assetlinks.json**:`apps/web/public/.well-known/assetlinks.json`,含包名 + **debug 签名 SHA-256**。
+  Vite 会拷进 dist;`firebase.json` 去掉 `**/.*` ignore(否则 .well-known 不部署)+ 加 json/no-cache header。
+  **已部署并验证** `https://zhinzen.lazydoglab.com/.well-known/assetlinks.json` 可访问。
+- **android 接收**:Manifest 加 `autoVerify` intent-filter(host lazydoglab.com + web.app,pathPrefix `/r/`),
+  `MainActivity` 提到 activity 级 VM + `onCreate/onNewIntent` 调 `viewModel.handleDeepLink(dataString)`;
+  VM `handleDeepLink` 解析 code → 有名字直接 joinRoom,没名字存 `pendingInvite` 等 onboarding 后加入。
+  Activity 设 `launchMode=singleTop`。
+- **SECRETS.md**:补充签名 keystore 说明(debug SHA 已进 assetlinks;release keystore 是必须单独保管的真密钥)。
+
+**验证**：web 部署 + assetlinks 可访问 ✅;android `assembleDebug` ✅。
+⚠️ 需真机:装新包后,系统验证 App Links 可能要等一会;可 `adb shell pm get-app-links com.lazydoglab.zhinzen`
+查状态。release 包要把 release 证书 SHA-256 也加进 assetlinks。
+
+---
+
 ## 2026-06-05 — 修复 App 看不到自己的轨迹（对齐网页）✅（已编译）
 
 - 网页 `trackDeviceId = selectedDeviceId ?? deviceId`（默认显示自己的轨迹);安卓之前只在
