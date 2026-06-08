@@ -29,6 +29,10 @@ export function RoomChoice({ onEnterRoom }: { onEnterRoom: () => void }) {
   const clearError = useRoomStore((s) => s.clearError);
   const [code, setCode] = useState(pendingJoinCode ?? '');
   const [history, setHistory] = useState(getRoomHistory);
+  // Hide the "open in app" prompt if the intent fallback already bounced back here.
+  const cameFromAppFallback =
+    typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('web');
+  const showOpenInApp = Boolean(pendingJoinCode) && isAndroid && !cameFromAppFallback;
 
   const onCreate = async () => {
     if (busy) return;
@@ -174,6 +178,31 @@ export function RoomChoice({ onEnterRoom }: { onEnterRoom: () => void }) {
           )}
           <p style={{ fontSize: 15, color: tokens.inkSoft, margin: 0 }}>{t('pickAction')}</p>
         </div>
+
+        {showOpenInApp && pendingJoinCode && (
+          <a
+            href={androidIntentUrl(pendingJoinCode)}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 12,
+              marginTop: 22,
+              padding: '14px 16px',
+              borderRadius: 16,
+              background: tokens.self,
+              color: '#fff',
+              textDecoration: 'none',
+              fontFamily: 'inherit',
+            }}
+          >
+            <Icon name="share" size={20} color="#fff" />
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 700, fontSize: 15 }}>{t('openInApp')}</div>
+              <div style={{ fontSize: 12.5, opacity: 0.9 }}>{t('openInAppSub')}</div>
+            </div>
+            <Icon name="chevron" size={18} color="#fff" />
+          </a>
+        )}
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 28 }}>
           <ChoiceCard
@@ -385,6 +414,21 @@ function MemberAvatars({ names }: { names: string[] }) {
         </div>
       )}
     </div>
+  );
+}
+
+const isAndroid = typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent);
+
+/**
+ * Chrome won't hand an https URL to the app on a same-tab navigation, so we use
+ * an `intent://` URL with a web fallback: opens the app if installed, otherwise
+ * loads the web page.
+ */
+function androidIntentUrl(roomId: string): string {
+  const fallback = encodeURIComponent(`https://zhinzen.lazydoglab.com/r/${roomId}?web=1`);
+  return (
+    `intent://zhinzen.lazydoglab.com/r/${roomId}#Intent;scheme=https;` +
+    `package=com.lazydoglab.zhinzen;S.browser_fallback_url=${fallback};end`
   );
 }
 
