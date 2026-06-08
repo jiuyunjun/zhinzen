@@ -144,7 +144,8 @@ export function MapScreen({ onLeave }: { onLeave: () => void }) {
   const onSelectRally = (id: string) => {
     setSelectedDeviceId(null);
     setSelectedRallyId(id);
-    setFollowMode('free');
+    // Frame self + the rally point, like selecting a member.
+    setFollowMode('track');
   };
   const onDeleteRally = (id: string) => {
     setSelectedRallyId(null);
@@ -336,6 +337,7 @@ export function MapScreen({ onLeave }: { onLeave: () => void }) {
         selectedDeviceId={selectedDeviceId}
         trackPoints={trackPoints}
         rallyPoints={rallyPoints}
+        selectedRallyId={selectedRallyId}
         onSelectMember={onSelectMember}
         onSelectRally={onSelectRally}
         onLongPress={onLongPress}

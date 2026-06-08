@@ -24,6 +24,7 @@
     <string name="battery_label">Battery</string>
     <string name="new_rally">New rally point</string>
     <string name="rally_default_name">Rally point</string>
+    <string name="rally_name_label">Rally point name</string>
     <string name="delete_rally">Delete rally point</string>
     <string name="create">Create</string>
     <string name="leave_room">Leave room</string>

@@ -35,6 +35,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -270,9 +271,13 @@ fun MapScreen(
                 key("rally-${rp.id}") {
                     val st = rememberMarkerState(position = LatLng(rp.lat, rp.lng))
                     LaunchedEffect(rp.lat, rp.lng) { st.position = LatLng(rp.lat, rp.lng) }
+                    val selectedRally = rp.id == selectedRallyId
                     Marker(
                         state = st,
-                        icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_VIOLET),
+                        icon = BitmapDescriptorFactory.defaultMarker(
+                            if (selectedRally) BitmapDescriptorFactory.HUE_AZURE else BitmapDescriptorFactory.HUE_VIOLET,
+                        ),
+                        zIndex = if (selectedRally) 6f else 2f,
                         title = rp.name,
                         onClick = {
                             onSelectRally(rp.id)
@@ -303,11 +308,16 @@ fun MapScreen(
                     LaunchedEffect(loc.lat, loc.lng) {
                         markerState.position = LatLng(loc.lat, loc.lng)
                     }
-                    val icon = rememberAvatarDescriptor(mv.member.displayName.ifBlank { "?" }.take(1), mv.isSelf)
+                    val icon = rememberAvatarDescriptor(
+                        mv.member.displayName.ifBlank { "?" }.take(1),
+                        mv.isSelf,
+                        mv.member.deviceId == selectedDeviceId,
+                    )
                     Marker(
                         state = markerState,
                         icon = icon,
                         anchor = Offset(0.5f, 0.5f),
+                        zIndex = if (mv.member.deviceId == selectedDeviceId) 5f else 1f,
                         title = mv.member.displayName.ifBlank { mv.member.deviceId },
                         onClick = {
                             onSelectMember(mv.member.deviceId)
@@ -450,6 +460,7 @@ fun MapScreen(
                     deviceHeading = deviceHeading,
                     canDelete = selectedRally.createdByDeviceId == selfId || isOwner,
                     onDelete = { onDeleteRally(selectedRally.id) },
+                    onClose = { onSelectRally(null) },
                 )
             } else {
                 MemberStrip(
@@ -629,6 +640,7 @@ private fun RallyDetail(
     deviceHeading: Float?,
     canDelete: Boolean,
     onDelete: () -> Unit,
+    onClose: () -> Unit,
 ) {
     val context = LocalContext.current
     val distance =
@@ -645,6 +657,15 @@ private fun RallyDetail(
         }
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text(text = "📍 ${point.name}", color = ZzColor.Ink, fontSize = 16.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+        Text(
+            text = "✕",
+            color = ZzColor.InkFaint,
+            fontSize = 18.sp,
+            modifier = Modifier
+                .clip(RoundedCornerShape(10.dp))
+                .clickable { onClose() }
+                .padding(horizontal = 12.dp, vertical = 6.dp),
+        )
     }
     Row(
         modifier = Modifier.padding(top = 12.dp),
@@ -680,21 +701,39 @@ private fun RallyNameDialog(onConfirm: (String) -> Unit, onCancel: () -> Unit) {
     var name by remember { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = onCancel,
-        title = { Text(stringResource(R.string.new_rally)) },
+        shape = RoundedCornerShape(22.dp),
+        containerColor = ZzColor.Surface,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(text = "📍", fontSize = 20.sp)
+                Text(stringResource(R.string.new_rally), fontWeight = FontWeight.Bold)
+            }
+        },
         text = {
             OutlinedTextField(
                 value = name,
                 onValueChange = { name = it },
                 singleLine = true,
+                shape = RoundedCornerShape(14.dp),
+                label = { Text(stringResource(R.string.rally_name_label)) },
                 placeholder = { Text(stringResource(R.string.rally_default_name)) },
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = ZzColor.Target,
+                    focusedLabelColor = ZzColor.Target,
+                    cursorColor = ZzColor.Target,
+                ),
+                modifier = Modifier.fillMaxWidth(),
             )
         },
         confirmButton = {
-            TextButton(onClick = { onConfirm(name.trim().ifBlank { "集结点" }) }) {
+            Button(
+                onClick = { onConfirm(name.trim().ifBlank { "集结点" }) },
+                colors = ButtonDefaults.buttonColors(containerColor = ZzColor.Target),
+            ) {
                 Text(stringResource(R.string.create))
             }
         },
-        dismissButton = { TextButton(onClick = onCancel) { Text(stringResource(R.string.cancel)) } },
+        dismissButton = { TextButton(onClick = onCancel) { Text(stringResource(R.string.cancel), color = ZzColor.InkSoft) } },
     )
 }
 
@@ -1163,29 +1202,40 @@ private fun DrawScope.drawFitAllIcon(color: Color) {
  * Compose MarkerComposable path renders blank on some phones (e.g. Sony A13).
  */
 @Composable
-private fun rememberAvatarDescriptor(initial: String, isSelf: Boolean): BitmapDescriptor {
+private fun rememberAvatarDescriptor(initial: String, isSelf: Boolean, selected: Boolean): BitmapDescriptor {
     val density = LocalDensity.current
     val fill = (if (isSelf) ZzColor.Self else ZzColor.Target).toArgb()
-    return remember(initial, isSelf, fill) {
-        val sizePx = with(density) { 44.dp.toPx() }.toInt().coerceAtLeast(1)
-        buildAvatarBitmap(initial, fill, sizePx)
+    return remember(initial, isSelf, fill, selected) {
+        val baseDp = if (selected) 56 else 44
+        val sizePx = with(density) { baseDp.dp.toPx() }.toInt().coerceAtLeast(1)
+        buildAvatarBitmap(initial, fill, sizePx, selected)
     }
 }
 
-private fun buildAvatarBitmap(initial: String, fillArgb: Int, sizePx: Int): BitmapDescriptor {
+private fun buildAvatarBitmap(initial: String, fillArgb: Int, sizePx: Int, selected: Boolean): BitmapDescriptor {
     val bitmap = android.graphics.Bitmap.createBitmap(sizePx, sizePx, android.graphics.Bitmap.Config.ARGB_8888)
     val canvas = android.graphics.Canvas(bitmap)
     val center = sizePx / 2f
+    if (selected) {
+        // Accent halo so the chosen target stands out.
+        canvas.drawCircle(
+            center,
+            center,
+            center,
+            android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { color = fillArgb; alpha = 80 },
+        )
+    }
+    val ringR = if (selected) center * 0.82f else center
     val ring = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
         color = android.graphics.Color.WHITE
     }
-    canvas.drawCircle(center, center, center, ring)
+    canvas.drawCircle(center, center, ringR, ring)
     val fill = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { color = fillArgb }
-    canvas.drawCircle(center, center, center * 0.82f, fill)
+    canvas.drawCircle(center, center, ringR * 0.82f, fill)
     val text = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
         color = android.graphics.Color.WHITE
         textAlign = android.graphics.Paint.Align.CENTER
-        textSize = sizePx * 0.42f
+        textSize = ringR * 0.7f
         typeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
     }
     val metrics = text.fontMetrics

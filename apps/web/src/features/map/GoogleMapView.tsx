@@ -27,6 +27,7 @@ interface GoogleMapViewProps {
   selectedDeviceId: string | null;
   trackPoints: TrackPoint[];
   rallyPoints: RallyPoint[];
+  selectedRallyId: string | null;
   onSelectMember: (deviceId: string) => void;
   onSelectRally: (id: string) => void;
   /** Long-press (or right-click) on the map to drop a rally point here. */
@@ -77,6 +78,7 @@ export function GoogleMapView({
   selectedDeviceId,
   trackPoints,
   rallyPoints,
+  selectedRallyId,
   onSelectMember,
   onSelectRally,
   onLongPress,
@@ -106,8 +108,12 @@ export function GoogleMapView({
 
   const selfLocation = pins.find((pin) => pin.isSelf)?.location ?? null;
   const focusLocation = selfLocation ?? pins[0]?.location ?? null;
+  const selectedRally = rallyPoints.find((p) => p.id === selectedRallyId) ?? null;
   const targetLocation =
     pins.find((pin) => !pin.isSelf && pin.id === selectedDeviceId)?.location ?? null;
+  // The thing the camera frames with self in track mode: selected member or rally.
+  const targetLatLng: google.maps.LatLngLiteral | null =
+    toLatLng(targetLocation) ?? (selectedRally ? { lat: selectedRally.lat, lng: selectedRally.lng } : null);
   // Track the moving lat/lng as primitives so follow effects re-run on movement.
   const focusLat = focusLocation?.lat ?? null;
   const focusLng = focusLocation?.lng ?? null;
@@ -180,8 +186,10 @@ export function GoogleMapView({
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
-    syncRallyMarkers(map, rallyMarkersRef.current, rallyPoints, (id) => onSelectRallyRef.current(id));
-  }, [rallyPoints]);
+    syncRallyMarkers(map, rallyMarkersRef.current, rallyPoints, selectedRallyId, (id) =>
+      onSelectRallyRef.current(id),
+    );
+  }, [rallyPoints, selectedRallyId]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -222,7 +230,7 @@ export function GoogleMapView({
     if (!map || followMode !== 'track') return;
 
     const self = toLatLng(focusLocation);
-    const target = toLatLng(targetLocation);
+    const target = targetLatLng;
     if (self && target) {
       const bounds = new google.maps.LatLngBounds();
       bounds.extend(self);
@@ -234,7 +242,7 @@ export function GoogleMapView({
       map.panTo(self);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [followMode, selectedDeviceId, recenterSignal]);
+  }, [followMode, selectedDeviceId, selectedRallyId, recenterSignal]);
 
   // Heading-up: rotate the map to match the device compass; off → snap to north.
   // No-op on raster maps (no Map ID), where setHeading has no visible effect.
@@ -394,6 +402,7 @@ function syncRallyMarkers(
   map: google.maps.Map,
   markers: Map<string, google.maps.Marker>,
   points: RallyPoint[],
+  selectedId: string | null,
   onSelect: (id: string) => void,
 ): void {
   const ids = new Set(points.map((p) => p.id));
@@ -404,21 +413,24 @@ function syncRallyMarkers(
     }
   }
   for (const point of points) {
-    let marker = markers.get(point.id);
+    const selected = point.id === selectedId;
     const icon: google.maps.Symbol = {
       path: 'M 0,-12 4,-4 12,-3 6,3 8,11 0,7 -8,11 -6,3 -12,-3 -4,-4 z', // star
       fillColor: '#7c3aed',
       fillOpacity: 1,
       strokeColor: '#fff',
-      strokeWeight: 2,
-      scale: 1.1,
+      strokeWeight: selected ? 3.5 : 2,
+      scale: selected ? 1.5 : 1.1,
       anchor: new google.maps.Point(0, 0),
     };
+    let marker = markers.get(point.id);
     if (!marker) {
-      marker = new google.maps.Marker({ map, icon, zIndex: 8 });
+      marker = new google.maps.Marker({ map });
       marker.addListener('click', () => onSelect(point.id));
       markers.set(point.id, marker);
     }
+    marker.setIcon(icon);
+    marker.setZIndex(selected ? 12 : 8);
     marker.setPosition({ lat: point.lat, lng: point.lng });
     marker.setTitle(point.name);
   }
