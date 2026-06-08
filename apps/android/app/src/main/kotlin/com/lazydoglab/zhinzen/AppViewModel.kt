@@ -57,6 +57,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val uwbController = UwbRangingController(application)
     private val estimators = mutableMapOf<String, NearbyEstimator>()
     private var lastHistoryMembers: List<String> = emptyList()
+    private var lastTrackFetchAt = 0L
 
     val deviceId: String = identity.deviceId
 
@@ -137,12 +138,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         selectedDeviceId = deviceId
         if (deviceId != null && deviceId != this.deviceId) {
             haptics.light()
-            fetchTrack(deviceId)
             startUwb(deviceId)
         } else {
-            trackPoints = emptyList()
             stopUwb()
         }
+        // Show the selected member's track, or your own when nothing/self is selected.
+        fetchTrack(selectedDeviceId ?: this.deviceId)
         updateCompass()
     }
 
@@ -205,10 +206,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun fetchTrack(targetDeviceId: String) {
         val rid = roomId ?: return
+        lastTrackFetchAt = System.currentTimeMillis()
         viewModelScope.launch {
             val since = System.currentTimeMillis() - 24 * 60 * 60 * 1000L
             runCatching { Backend.fetchTrack(rid, targetDeviceId, since) }
-                .onSuccess { if (selectedDeviceId == targetDeviceId) trackPoints = it }
+                // Ignore stale results: only apply if this is still the active target
+                // (the selected member, or self when nothing is selected).
+                .onSuccess { if ((selectedDeviceId ?: deviceId) == targetDeviceId) trackPoints = it }
         }
     }
 
@@ -341,6 +345,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         startWatching(id)
         if (locationController.hasPermission()) startLocation()
         startNearby()
+        fetchTrack(deviceId) // show your own track by default
     }
 
     private fun startWatching(roomId: String) {
@@ -406,6 +411,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             if (names != lastHistoryMembers) {
                 lastHistoryMembers = names
                 roomHistory = roomHistoryStore.updateMembers(rid, names)
+            }
+            // Live-grow the active track (own or selected) as positions come in.
+            if (System.currentTimeMillis() - lastTrackFetchAt > 10_000L) {
+                fetchTrack(selectedDeviceId ?: deviceId)
             }
         }
         if (selectedDeviceId != null && views.none { it.member.deviceId == selectedDeviceId }) {

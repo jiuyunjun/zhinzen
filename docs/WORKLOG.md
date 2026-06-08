@@ -5,6 +5,19 @@
 
 ---
 
+## 2026-06-05 — 修复 App 看不到自己的轨迹（对齐网页）✅（已编译）
+
+- 网页 `trackDeviceId = selectedDeviceId ?? deviceId`（默认显示自己的轨迹);安卓之前只在
+  选中**别人**时取轨迹,选自己/不选就清空 → 看不到自己的轨迹。
+- 修:`selectMember` 改为取 `selectedDeviceId ?: deviceId` 的轨迹;`fetchTrack` 的防陈旧判断
+  改成 `(selectedDeviceId ?: deviceId) == target`;`enterRoom` 进房即取自己轨迹。
+- 另外:`rebuildMembers` 里每 >10s 重取一次当前目标轨迹,自己的轨迹会随移动**实时增长**
+  (网页是选中变化才取,安卓这里更主动)。
+
+**验证**：`assembleDebug` ✅。
+
+---
+
 ## 2026-06-05 — 轨迹渲染优化：按缩放抽稀 + 同色段合并（web 已部署 / android 已编译）✅
 
 **问题**：之前每两个轨迹点画一条 Polyline → N 点 = N 个绘制对象,点多就卡。
