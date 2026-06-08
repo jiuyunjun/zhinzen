@@ -6,5 +6,5 @@
 export type { Millis, LatLng, Platform } from './common';
 export type { Room, RoomStatus } from './room';
 export type { RoomMember, MemberStatus, DeviceCapabilities } from './member';
-export type { LiveLocation, TrackPoint, TrackSegmentKind } from './location';
+export type { LiveLocation, RallyPoint, TrackPoint, TrackSegmentKind } from './location';
 export type { DeviceIdentity, DeviceSession } from './device';

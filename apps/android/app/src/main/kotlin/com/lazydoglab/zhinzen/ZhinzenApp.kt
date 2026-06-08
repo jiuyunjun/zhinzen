@@ -50,10 +50,12 @@ fun ZhinzenApp(viewModel: AppViewModel = viewModel()) {
                         nearbyEstimates = viewModel.nearbyEstimates,
                         nearbyUwb = viewModel.nearbyUwb,
                         nearbyScanning = viewModel.nearbyScanning,
+                        isOwner = viewModel.isOwner,
                         onLeave = viewModel::leaveRoom,
                         onPermissionGranted = viewModel::onLocationPermissionGranted,
                         onSelectMember = viewModel::selectMember,
                         onRename = viewModel::renameInRoom,
+                        onKick = viewModel::kickMember,
                         onToggleSharing = { viewModel.updateSharing(!viewModel.sharing) },
                         onToggleHeadingUp = viewModel::toggleHeadingUp,
                     )

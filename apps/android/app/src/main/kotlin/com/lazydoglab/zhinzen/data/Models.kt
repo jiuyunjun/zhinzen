@@ -34,6 +34,7 @@ data class LiveLocation(
     val speed: Double = 0.0,
     val updatedAt: Long = 0,
     val sharingLocation: Boolean = true,
+    val battery: Int? = null,
 )
 
 data class TrackPoint(

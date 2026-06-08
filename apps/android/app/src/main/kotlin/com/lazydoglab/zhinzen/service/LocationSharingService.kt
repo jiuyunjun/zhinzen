@@ -123,6 +123,7 @@ class LocationSharingService : Service() {
                 speed = if (loc.hasSpeed()) loc.speed.toDouble() else 0.0,
                 updatedAt = now,
                 sharingLocation = true,
+                battery = readBatteryPercent(),
             )
 
         if (now - lastUploadAt >= 3000L) {
@@ -139,6 +140,12 @@ class LocationSharingService : Service() {
             lastTrackLng = live.lng
             scope.launch { runCatching { Backend.appendTrackPoint(identity, rid, live) } }
         }
+    }
+
+    private fun readBatteryPercent(): Int? {
+        val bm = getSystemService(Context.BATTERY_SERVICE) as? android.os.BatteryManager ?: return null
+        val pct = bm.getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY)
+        return pct.takeIf { it in 0..100 }
     }
 
     private fun startForegroundCompat() {

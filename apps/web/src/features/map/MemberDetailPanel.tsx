@@ -16,6 +16,9 @@ import { useUiStore } from '../../state/uiStore';
 interface MemberDetailPanelProps {
   member: MemberView;
   ownLocation: LiveLocation | null;
+  /** Owner-only: show a kick button for this (other) member. */
+  canKick?: boolean;
+  onKick?: (deviceId: string) => void;
   onClose: () => void;
   onLeaveRoom?: () => void;
   /** Save a new display name for self (only used for the self panel). */
@@ -30,6 +33,8 @@ interface MemberDetailPanelProps {
 export function MemberDetailPanel({
   member,
   ownLocation,
+  canKick,
+  onKick,
   onClose,
   onLeaveRoom,
   onRename,
@@ -39,7 +44,15 @@ export function MemberDetailPanel({
       <SelfPanel member={member} onClose={onClose} onLeaveRoom={onLeaveRoom} onRename={onRename} />
     );
   }
-  return <OtherPanel member={member} ownLocation={ownLocation} onClose={onClose} />;
+  return (
+    <OtherPanel
+      member={member}
+      ownLocation={ownLocation}
+      canKick={canKick}
+      onKick={onKick}
+      onClose={onClose}
+    />
+  );
 }
 
 function PanelHeader({
@@ -237,10 +250,14 @@ function SelfPanel({
 function OtherPanel({
   member,
   ownLocation,
+  canKick,
+  onKick,
   onClose,
 }: {
   member: MemberView;
   ownLocation: LiveLocation | null;
+  canKick?: boolean;
+  onKick?: (deviceId: string) => void;
   onClose: () => void;
 }) {
   const t = useUiStore((s) => s.t);
@@ -282,6 +299,9 @@ function OtherPanel({
           label={t('lastUpdated')}
           value={location ? formatRelativeTime(location.updatedAt) : t('noLocation')}
         />
+        {typeof location?.battery === 'number' && (
+          <Metric label={t('battery')} value={`${location.battery}%`} />
+        )}
       </div>
 
       <CapabilityChips capabilities={member.member.capabilities} />
@@ -324,6 +344,28 @@ function OtherPanel({
         <Icon name="nav" size={17} />
         {t('navigate')}
       </button>
+
+      {canKick && onKick && (
+        <button
+          type="button"
+          onClick={() => onKick(member.member.deviceId)}
+          style={{
+            width: '100%',
+            height: 42,
+            marginTop: 10,
+            borderRadius: 14,
+            border: `1.5px solid ${withAlpha(tokens.danger, 0.4)}`,
+            cursor: 'pointer',
+            background: withAlpha(tokens.danger, 0.08),
+            color: tokens.danger,
+            fontFamily: 'inherit',
+            fontSize: 13.5,
+            fontWeight: 700,
+          }}
+        >
+          {t('kickMember')}
+        </button>
+      )}
     </section>
   );
 }

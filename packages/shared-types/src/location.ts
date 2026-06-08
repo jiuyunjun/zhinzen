@@ -19,6 +19,21 @@ export interface LiveLocation {
   speed: number;
   updatedAt: Millis;
   sharingLocation: boolean;
+  /** Battery level 0–100, or null when unavailable (e.g. browsers without the API). */
+  battery?: number | null;
+}
+
+/**
+ * A shared rally point — a long-press-placed marker that behaves like a member
+ * (shows on the map + list). Lives in RTDB `rallyPoints/{roomId}/{id}`.
+ */
+export interface RallyPoint {
+  id: string;
+  name: string;
+  lat: number;
+  lng: number;
+  createdByDeviceId: string;
+  createdAt: Millis;
 }
 
 /**

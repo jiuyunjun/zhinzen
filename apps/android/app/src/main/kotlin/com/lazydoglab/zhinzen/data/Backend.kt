@@ -39,27 +39,39 @@ object Backend {
             "capabilities" to capabilities,
         )
 
-    /** Create a room via the createRoom callable; returns the new roomId. */
+    /** Create a room via the createRoom callable. */
     suspend fun createRoom(
         identity: DeviceIdentity,
         sharing: Boolean,
         capabilities: Map<String, Any>,
-    ): String {
+    ): RoomResult {
         val result =
             functions.getHttpsCallable("createRoom").call(payload(identity, sharing, capabilities)).await()
-        return roomIdFrom(result.getData())
+        return roomResultFrom(result.getData())
     }
 
-    /** Join an existing room via the joinRoom callable; returns the roomId. */
+    /** Join an existing room via the joinRoom callable. */
     suspend fun joinRoom(
         identity: DeviceIdentity,
         roomId: String,
         sharing: Boolean,
         capabilities: Map<String, Any>,
-    ): String {
+    ): RoomResult {
         val data = payload(identity, sharing, capabilities).apply { put("roomId", roomId) }
         val result = functions.getHttpsCallable("joinRoom").call(data).await()
-        return roomIdFrom(result.getData())
+        return roomResultFrom(result.getData())
+    }
+
+    /** Owner-only: remove a member from the room. */
+    suspend fun kickMember(identity: DeviceIdentity, roomId: String, targetDeviceId: String) {
+        val data =
+            hashMapOf(
+                "roomId" to roomId,
+                "deviceId" to identity.deviceId,
+                "deviceSecret" to identity.deviceSecret,
+                "targetDeviceId" to targetDeviceId,
+            )
+        functions.getHttpsCallable("kickMember").call(data).await()
     }
 
     /**
@@ -95,8 +107,12 @@ object Backend {
         return snapshot.children.mapNotNull { it.getValue(TrackPoint::class.java) }
     }
 
-    private fun roomIdFrom(data: Any?): String {
+    private fun roomResultFrom(data: Any?): RoomResult {
         val map = data as? Map<*, *> ?: error("Unexpected room response")
-        return map["roomId"] as? String ?: error("Missing roomId in response")
+        val roomId = map["roomId"] as? String ?: error("Missing roomId in response")
+        return RoomResult(roomId, (map["createdByDeviceId"] as? String).orEmpty())
     }
 }
+
+/** Result of create/join: the room id and its creator (owner) device id. */
+data class RoomResult(val roomId: String, val createdByDeviceId: String)

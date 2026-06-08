@@ -21,6 +21,7 @@ export interface RoomFunctionResult {
   expiresAt: number;
   maxMembers: number;
   trackRetentionMinutes: number;
+  createdByDeviceId: string;
 }
 
 export type RoomApiErrorCode =
@@ -85,6 +86,17 @@ export async function joinRoomOnBackend(
   const joinRoom = httpsCallable<JoinRoomPayload, RoomFunctionResult>(functions, 'joinRoom');
   const result = await joinRoom(payload);
   return result.data;
+}
+
+export async function kickMemberOnBackend(payload: {
+  roomId: string;
+  deviceId: string;
+  deviceSecret: string;
+  targetDeviceId: string;
+}): Promise<void> {
+  const { functions } = getFirebaseServices();
+  const kick = httpsCallable(functions, 'kickMember');
+  await kick(payload);
 }
 
 export function toRoomApiError(error: unknown): RoomApiError {

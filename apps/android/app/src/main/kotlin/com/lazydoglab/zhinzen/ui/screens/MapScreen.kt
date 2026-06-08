@@ -32,6 +32,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -110,10 +111,12 @@ fun MapScreen(
     nearbyEstimates: Map<String, NearbyEstimate>,
     nearbyUwb: UwbResult?,
     nearbyScanning: Boolean,
+    isOwner: Boolean,
     onLeave: () -> Unit,
     onPermissionGranted: () -> Unit,
     onSelectMember: (String?) -> Unit,
     onRename: (String) -> Unit,
+    onKick: (String) -> Unit,
     onToggleSharing: () -> Unit,
     onToggleHeadingUp: () -> Unit,
     modifier: Modifier = Modifier,
@@ -407,6 +410,8 @@ fun MapScreen(
                     estimate = nearbyEstimates[selected.member.deviceId],
                     uwb = nearbyUwb,
                     nearbyScanning = nearbyScanning,
+                    canKick = isOwner && !selected.isSelf,
+                    onKick = onKick,
                     onClose = { onSelectMember(null) },
                     onRename = onRename,
                     onLeave = { showLeaveConfirm = true },
@@ -470,6 +475,8 @@ private fun MemberDetail(
     estimate: NearbyEstimate?,
     uwb: UwbResult?,
     nearbyScanning: Boolean,
+    canKick: Boolean,
+    onKick: (String) -> Unit,
     onClose: () -> Unit,
     onRename: (String) -> Unit,
     onLeave: () -> Unit,
@@ -504,7 +511,7 @@ private fun MemberDetail(
     if (member.isSelf) {
         SelfEditor(member, onRename, onLeave)
     } else {
-        OtherDetail(member, selfLocation, deviceHeading, estimate, uwb, nearbyScanning)
+        OtherDetail(member, selfLocation, deviceHeading, estimate, uwb, nearbyScanning, canKick, onKick)
     }
 }
 
@@ -548,6 +555,8 @@ private fun OtherDetail(
     estimate: NearbyEstimate?,
     uwb: UwbResult?,
     nearbyScanning: Boolean,
+    canKick: Boolean,
+    onKick: (String) -> Unit,
 ) {
     val context = LocalContext.current
     val haptic = LocalHapticFeedback.current
@@ -603,6 +612,15 @@ private fun OtherDetail(
         Text(stringResource(R.string.navigate))
     }
 
+    member.location?.battery?.let { battery ->
+        Text(
+            text = "${stringResource(R.string.battery_label)} $battery%",
+            color = ZzColor.InkSoft,
+            fontSize = 12.5.sp,
+            modifier = Modifier.padding(top = 8.dp),
+        )
+    }
+
     if (location != null && member.status != MemberStatus.ONLINE) {
         Text(
             text = stringResource(R.string.nav_stale_hint),
@@ -610,6 +628,18 @@ private fun OtherDetail(
             fontSize = 12.sp,
             modifier = Modifier.padding(top = 8.dp),
         )
+    }
+
+    if (canKick) {
+        OutlinedButton(
+            onClick = { onKick(member.member.deviceId) },
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 10.dp),
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFDC2626)),
+        ) {
+            Text(stringResource(R.string.kick_member))
+        }
     }
 
     // Indoor: GPS is unreliable, lean on Bluetooth to find each other.

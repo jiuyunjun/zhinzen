@@ -7,6 +7,7 @@ import {
   buildRoomPayload,
   createRoomOnBackend,
   joinRoomOnBackend,
+  kickMemberOnBackend,
   toRoomApiError,
   type RoomApiErrorCode,
 } from '../lib/roomApi';
@@ -22,6 +23,8 @@ import {
 interface RoomState {
   roomId: string | null;
   pendingJoinCode: string | null;
+  /** Device id of the room creator (owner), or null until create/join resolves. */
+  createdByDeviceId: string | null;
   /** Whether this device is currently sharing its location. */
   sharing: boolean;
   busy: boolean;
@@ -31,6 +34,8 @@ interface RoomState {
   joinRoom: (input: string) => Promise<string | null>;
   /** Best-effort re-upsert of this device's member record (e.g. after a rename). */
   syncMembership: () => Promise<void>;
+  /** Owner-only: remove a member from the room. */
+  kickMember: (targetDeviceId: string) => Promise<void>;
   leaveRoom: () => void;
   setSharing: (on: boolean) => void;
   clearError: () => void;
@@ -48,6 +53,7 @@ export const useRoomStore = create<RoomState>((set, get) => ({
   roomId: null,
   // Pick up an invite link without joining until the backend validates it.
   pendingJoinCode: roomFromUrl(),
+  createdByDeviceId: null,
   sharing: true,
   busy: false,
   error: null,
@@ -65,7 +71,13 @@ export const useRoomStore = create<RoomState>((set, get) => ({
       );
       syncUrl(room.roomId);
       addRoomToHistory(room.roomId);
-      set({ roomId: room.roomId, pendingJoinCode: null, sharing: true, busy: false });
+      set({
+        roomId: room.roomId,
+        pendingJoinCode: null,
+        createdByDeviceId: room.createdByDeviceId,
+        sharing: true,
+        busy: false,
+      });
       haptics.success();
       return room.roomId;
     } catch (error) {
@@ -92,7 +104,13 @@ export const useRoomStore = create<RoomState>((set, get) => ({
       });
       syncUrl(room.roomId);
       addRoomToHistory(room.roomId);
-      set({ roomId: room.roomId, pendingJoinCode: null, sharing: true, busy: false });
+      set({
+        roomId: room.roomId,
+        pendingJoinCode: null,
+        createdByDeviceId: room.createdByDeviceId,
+        sharing: true,
+        busy: false,
+      });
       haptics.success();
       return room.roomId;
     } catch (error) {
@@ -120,9 +138,20 @@ export const useRoomStore = create<RoomState>((set, get) => ({
       // Best-effort: a failed rename sync shouldn't disrupt the session.
     }
   },
+  kickMember: async (targetDeviceId) => {
+    const roomId = get().roomId;
+    if (!roomId) return;
+    const device = useDeviceStore.getState();
+    await kickMemberOnBackend({
+      roomId,
+      deviceId: device.deviceId,
+      deviceSecret: device.deviceSecret,
+      targetDeviceId,
+    });
+  },
   leaveRoom: () => {
     syncUrl(null);
-    set({ roomId: null, pendingJoinCode: null, error: null });
+    set({ roomId: null, pendingJoinCode: null, createdByDeviceId: null, error: null });
   },
   setSharing: (on) => set({ sharing: on }),
   clearError: () => set({ error: null }),

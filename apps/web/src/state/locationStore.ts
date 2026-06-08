@@ -42,6 +42,25 @@ let lastTrackAt = 0;
 let lastTrackLat: number | null = null;
 let lastTrackLng: number | null = null;
 let cancelPresence: (() => void) | null = null;
+let batteryLevel: number | null = null;
+
+// Battery Status API (Chrome/Android only; absent on iOS/Firefox → stays null).
+function initBattery(): void {
+  const nav = navigator as Navigator & {
+    getBattery?: () => Promise<{ level: number; addEventListener: (e: string, cb: () => void) => void }>;
+  };
+  if (!nav.getBattery) return;
+  nav
+    .getBattery()
+    .then((b) => {
+      const update = () => {
+        batteryLevel = Math.round(b.level * 100);
+      };
+      update();
+      b.addEventListener('levelchange', update);
+    })
+    .catch(() => {});
+}
 
 function positionToLiveLocation(
   position: GeolocationPosition,
@@ -64,6 +83,7 @@ function positionToLiveLocation(
         : 0,
     updatedAt: Date.now(),
     sharingLocation,
+    battery: batteryLevel,
   };
 }
 
@@ -144,6 +164,7 @@ export const useLocationStore = create<LocationState>((set, get) => ({
     lastTrackAt = 0;
     lastTrackLat = null;
     lastTrackLng = null;
+    initBattery();
     cancelPresence?.();
     cancelPresence = setupPresence(input.roomId, input.deviceId);
     set({ status: 'requesting', permission: await readPermission(), error: null });

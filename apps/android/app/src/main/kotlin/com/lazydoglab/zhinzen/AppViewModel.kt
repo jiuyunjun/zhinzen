@@ -1,6 +1,7 @@
 package com.lazydoglab.zhinzen
 
 import android.app.Application
+import android.widget.Toast
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -59,6 +60,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private var lastHistoryMembers: List<String> = emptyList()
     private var lastTrackFetchAt = 0L
     private var pendingInvite: String? = null
+    private var prevMemberIds: Set<String>? = null
+    private var seenSelf = false
 
     val deviceId: String = identity.deviceId
 
@@ -78,6 +81,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         private set
     var selectedDeviceId by mutableStateOf<String?>(null)
         private set
+    /** Room creator's deviceId (owner). Null until create/join resolves. */
+    var createdByDeviceId by mutableStateOf<String?>(null)
+        private set
+    val isOwner: Boolean get() = createdByDeviceId != null && createdByDeviceId == deviceId
     /** Device compass heading (degrees, 0 = north), or null if unavailable. */
     var deviceHeading by mutableStateOf<Float?>(null)
         private set
@@ -213,6 +220,20 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         nearbyUwb = null
     }
 
+    /** Owner-only: remove a member from the room. */
+    fun kickMember(targetDeviceId: String) {
+        val rid = roomId ?: return
+        if (!isOwner || targetDeviceId == deviceId) return
+        haptics.tap()
+        if (selectedDeviceId == targetDeviceId) selectMember(null)
+        viewModelScope.launch {
+            runCatching { Backend.kickMember(currentIdentity(), rid, targetDeviceId) }
+                .onFailure {
+                    Toast.makeText(getApplication(), it.message ?: "踢出失败", Toast.LENGTH_SHORT).show()
+                }
+        }
+    }
+
     fun toggleHeadingUp() {
         headingUp = !headingUp
         haptics.tap()
@@ -261,7 +282,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             busy = true
             errorMessage = null
             try {
-                enterRoom(Backend.createRoom(currentIdentity(), sharing, capabilities))
+                val res = Backend.createRoom(currentIdentity(), sharing, capabilities)
+                createdByDeviceId = res.createdByDeviceId
+                enterRoom(res.roomId)
                 haptics.success()
             } catch (e: Exception) {
                 errorMessage = e.message ?: "创建房间失败"
@@ -284,7 +307,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             busy = true
             errorMessage = null
             try {
-                enterRoom(Backend.joinRoom(currentIdentity(), parsed, sharing, capabilities))
+                val res = Backend.joinRoom(currentIdentity(), parsed, sharing, capabilities)
+                createdByDeviceId = res.createdByDeviceId
+                enterRoom(res.roomId)
                 haptics.success()
             } catch (e: Exception) {
                 errorMessage = e.message ?: "加入房间失败"
@@ -314,6 +339,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         roomId = null
         ownLocation = null
         selectedDeviceId = null
+        createdByDeviceId = null
         trackPoints = emptyList()
         members.clear()
         phase = Phase.Room
@@ -361,6 +387,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         roomId = id
         selectedDeviceId = null
         lastHistoryMembers = emptyList()
+        prevMemberIds = null
+        seenSelf = false
         roomHistory = roomHistoryStore.add(id)
         phase = Phase.Map
         startWatching(id)
@@ -425,6 +453,29 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         members.addAll(views)
         // ownLocation comes from our own RTDB echo (the foreground service uploads it).
         views.firstOrNull { it.isSelf }?.location?.let { ownLocation = it }
+
+        // New-member alert (skip initial baseline) + kicked detection.
+        val ids = views.map { it.member.deviceId }.toSet()
+        prevMemberIds?.let { prev ->
+            views.filter { !it.isSelf && it.member.deviceId !in prev }.forEach { joined ->
+                haptics.success()
+                Toast.makeText(
+                    getApplication(),
+                    getApplication<Application>().getString(R.string.member_joined, joined.member.displayName.ifBlank { "?" }),
+                    Toast.LENGTH_SHORT,
+                ).show()
+            }
+        }
+        prevMemberIds = ids
+        if (views.any { it.isSelf }) {
+            seenSelf = true
+        } else if (seenSelf) {
+            seenSelf = false
+            haptics.error()
+            Toast.makeText(getApplication(), getApplication<Application>().getString(R.string.kicked_from_room), Toast.LENGTH_LONG).show()
+            leaveRoom()
+            return
+        }
         // Capture member names for the room-history avatar previews (only on change).
         val rid = roomId
         if (rid != null) {

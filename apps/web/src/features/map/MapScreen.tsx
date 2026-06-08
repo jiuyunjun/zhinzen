@@ -37,6 +37,8 @@ export function MapScreen({ onLeave }: { onLeave: () => void }) {
   const members = useMembersStore((s) => s.members);
   const watchMembers = useMembersStore((s) => s.watchRoom);
   const stopWatchingMembers = useMembersStore((s) => s.stopWatching);
+  const createdByDeviceId = useRoomStore((s) => s.createdByDeviceId);
+  const kickMember = useRoomStore((s) => s.kickMember);
   const startCompass = useSensorStore((s) => s.startCompass);
   const sensorHeading = useSensorStore((s) => s.heading);
   const displayName = useDeviceStore((s) => s.displayName);
@@ -78,6 +80,37 @@ export function MapScreen({ onLeave }: { onLeave: () => void }) {
     watchMembers(roomId, deviceId);
     return () => stopWatchingMembers();
   }, [deviceId, roomId, stopWatchingMembers, watchMembers]);
+
+  // New-member alert + kicked detection, by diffing the member list.
+  const prevMemberIdsRef = useRef<Set<string> | null>(null);
+  const seenSelfRef = useRef(false);
+  useEffect(() => {
+    if (!roomId) return;
+    const ids = new Set(members.map((m) => m.member.deviceId));
+    if (prevMemberIdsRef.current) {
+      for (const m of members) {
+        if (!m.isSelf && !prevMemberIdsRef.current.has(m.member.deviceId)) {
+          flash(t('memberJoined', { name: m.member.displayName || t('you') }));
+          haptics.success();
+        }
+      }
+    }
+    prevMemberIdsRef.current = ids;
+
+    if (members.some((m) => m.isSelf)) {
+      seenSelfRef.current = true;
+    } else if (seenSelfRef.current) {
+      seenSelfRef.current = false;
+      flash(t('kickedFromRoom'));
+      haptics.error();
+      onLeave();
+    }
+  }, [members, roomId, t, flash, onLeave]);
+
+  const onKick = (targetDeviceId: string) => {
+    setSelectedDeviceId(null);
+    void kickMember(targetDeviceId).catch(() => flash(t('kickFailed')));
+  };
 
   // Capture member names for the room-history avatar previews.
   const memberNamesKey = members.map((m) => m.member.displayName).join('');
@@ -398,6 +431,8 @@ export function MapScreen({ onLeave }: { onLeave: () => void }) {
           <MemberDetailPanel
             member={selectedMember}
             ownLocation={effectiveOwnLocation}
+            canKick={createdByDeviceId === deviceId && !selectedMember.isSelf}
+            onKick={onKick}
             onClose={onCloseDetail}
             onLeaveRoom={onLeave}
             onRename={onRename}
