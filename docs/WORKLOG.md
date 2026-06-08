@@ -5,6 +5,26 @@
 
 ---
 
+## 2026-06-05 — 轨迹渲染优化：按缩放抽稀 + 同色段合并（web 已部署 / android 已编译）✅
+
+**问题**：之前每两个轨迹点画一条 Polyline → N 点 = N 个绘制对象,点多就卡。
+
+**两个杠杆(共享算法,两端一致)**
+- `@zhinzen/geo-utils` 新增 `buildTrackSegments(points, zoom)`(+ `metersPerPixel`、
+  `trackSpeedBucket`、`trackBucketColor`),复用已有的 `simplifyTrack`(RDP):
+  1. **按缩放抽稀**:容差 = 当前 zoom 的每像素米数 × 2.5px → 缩小时丢掉亚像素细节;
+  2. **同色段合并**:速度量化成 8km/h 一档,连续同档点合并成**一条多点 Polyline**
+     → 绘制对象从 O(N) 降到 O(颜色切换次数)。
+- web `GoogleMapView`：`syncTrackSegments` 改用 `buildTrackSegments`;监听 `zoom_changed`
+  (防抖 150ms)重算。删掉本地的 colorForTrackSpeed/rgbToHex 等。
+- android：新增 `map/TrackSimplify.kt`(同算法 Kotlin 版),`MapScreen` 用
+  `remember(trackPoints.size, zoomKey)` 按整数 zoom 重算,每个 segment 一条 Polyline。
+
+**验证**：web `build` ✅ **已部署**;android `assembleDebug` ✅。颜色由连续渐变变为 8km/h 分档,
+肉眼几乎无差。`pixelTolerance`(2.5)/`BUCKET_KMH`(8) 可调。
+
+---
+
 ## 2026-06-05 — App 复制邀请链接 + 密钥清单文档 ✅（已编译/已 push）
 
 - **复制邀请链接**:地图顶部"房间码"条改为可点,旁边加「复制邀请」;点按复制

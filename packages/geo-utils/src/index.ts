@@ -145,6 +145,91 @@ export function simplifyTrack<T extends LatLng>(
   return points.filter((_, i) => keep[i]);
 }
 
+/** Web-Mercator ground resolution (meters per CSS pixel) at a latitude + zoom. */
+export function metersPerPixel(lat: number, zoom: number): number {
+  return (156543.03392 * Math.cos(toRad(lat))) / 2 ** zoom;
+}
+
+// Speed→color ramp (km/h): 0–15 red, ~28 yellow, 40+ green. Shared so the
+// quantized bucket colors match the original continuous gradient.
+const TRACK_STOPS: ReadonlyArray<readonly [number, readonly [number, number, number]]> = [
+  [0, [220, 38, 38]],
+  [15, [220, 38, 38]],
+  [28, [234, 179, 8]],
+  [40, [34, 197, 94]],
+  [200, [34, 197, 94]],
+];
+/** Quantization step (km/h). Bigger = fewer colors → more segment merging. */
+const TRACK_BUCKET_KMH = 8;
+const TRACK_MAX_BUCKET = 8;
+
+function trackRgb(kmh: number): [number, number, number] {
+  for (let i = 1; i < TRACK_STOPS.length; i++) {
+    const [s0, c0] = TRACK_STOPS[i - 1];
+    const [s1, c1] = TRACK_STOPS[i];
+    if (kmh <= s1) {
+      const r = (kmh - s0) / (s1 - s0);
+      return [
+        Math.round(c0[0] + (c1[0] - c0[0]) * r),
+        Math.round(c0[1] + (c1[1] - c0[1]) * r),
+        Math.round(c0[2] + (c1[2] - c0[2]) * r),
+      ];
+    }
+  }
+  return [...TRACK_STOPS[TRACK_STOPS.length - 1][1]] as [number, number, number];
+}
+
+/** Quantize a speed (m/s) into a small bucket index, for color-run merging. */
+export function trackSpeedBucket(speedMps: number): number {
+  const kmh = Number.isFinite(speedMps) ? Math.max(0, speedMps * 3.6) : 0;
+  return Math.min(Math.round(kmh / TRACK_BUCKET_KMH), TRACK_MAX_BUCKET);
+}
+
+/** Hex color for a speed bucket (matches the continuous gradient at the bucket center). */
+export function trackBucketColor(bucket: number): string {
+  const [r, g, b] = trackRgb(bucket * TRACK_BUCKET_KMH);
+  const hex = (n: number) => n.toString(16).padStart(2, '0');
+  return `#${hex(r)}${hex(g)}${hex(b)}`;
+}
+
+export interface TrackSegment {
+  path: LatLng[];
+  colorHex: string;
+}
+
+/**
+ * Build renderable track segments (lever 1 + 2): simplify the points by the
+ * current zoom (tolerance ≈ `pixelTolerance` screen px), quantize speed into
+ * color buckets, and merge consecutive same-color runs into one polyline. Turns
+ * O(N) per-segment polylines into O(color runs), and drops sub-pixel detail when
+ * zoomed out. Input must be time-ordered.
+ */
+export function buildTrackSegments<T extends LatLng & { speed: number }>(
+  points: readonly T[],
+  zoom: number,
+  pixelTolerance = 2.5,
+): TrackSegment[] {
+  const ordered = points.filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lng));
+  if (ordered.length < 2) return [];
+  const midLat = ordered[Math.floor(ordered.length / 2)].lat;
+  const tolerance = Math.max(0.5, metersPerPixel(midLat, zoom) * pixelTolerance);
+  const simplified = simplifyTrack(ordered, tolerance);
+
+  const segments: TrackSegment[] = [];
+  for (let i = 1; i < simplified.length; i++) {
+    const a = simplified[i - 1];
+    const b = simplified[i];
+    const colorHex = trackBucketColor(trackSpeedBucket((a.speed + b.speed) / 2));
+    const last = segments[segments.length - 1];
+    if (last && last.colorHex === colorHex) {
+      last.path.push({ lat: b.lat, lng: b.lng });
+    } else {
+      segments.push({ path: [{ lat: a.lat, lng: a.lng }, { lat: b.lat, lng: b.lng }], colorHex });
+    }
+  }
+  return segments;
+}
+
 function perpendicularDistance(
   point: [number, number],
   lineStart: [number, number],

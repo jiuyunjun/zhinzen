@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { LiveLocation, TrackPoint } from '@zhinzen/shared-types';
+import { buildTrackSegments } from '@zhinzen/geo-utils';
 import { color as tokens, font, withAlpha } from '@zhinzen/shared-ui';
 
 import { isMapsConfigured, mapsMapId } from '../../lib/env';
@@ -162,7 +163,21 @@ export function GoogleMapView({
     const map = mapRef.current;
     if (!map) return;
 
-    syncTrackSegments(map, trackSegmentsRef.current, trackPoints);
+    const render = () =>
+      syncTrackSegments(map, trackSegmentsRef.current, trackPoints, map.getZoom() ?? 16);
+    render();
+
+    // Re-thin/re-color when the zoom changes, debounced so a pinch doesn't rebuild
+    // on every frame.
+    let timer: number | undefined;
+    const listener = map.addListener('zoom_changed', () => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(render, 150);
+    });
+    return () => {
+      window.clearTimeout(timer);
+      listener.remove();
+    };
   }, [trackPoints]);
 
   // Follow self: keep the camera on the user's marker as it moves. `recenterSignal`
@@ -355,6 +370,7 @@ function syncTrackSegments(
   map: google.maps.Map,
   segments: google.maps.Polyline[],
   points: TrackPoint[],
+  zoom: number,
 ): void {
   clearTrackSegments(segments);
   segments.length = 0;
@@ -363,67 +379,25 @@ function syncTrackSegments(
     .filter((point) => Number.isFinite(point.lat) && Number.isFinite(point.lng))
     .sort((a, b) => a.createdAt - b.createdAt);
 
-  for (let index = 1; index < ordered.length; index += 1) {
-    const previous = ordered[index - 1];
-    const current = ordered[index];
-    const segment = new google.maps.Polyline({
-      map,
-      path: [
-        { lat: previous.lat, lng: previous.lng },
-        { lat: current.lat, lng: current.lng },
-      ],
-      geodesic: true,
-      strokeColor: colorForTrackSpeed((previous.speed + current.speed) / 2),
-      strokeOpacity: 0.82,
-      strokeWeight: 6,
-      zIndex: 6,
-    });
-    segments.push(segment);
+  // Simplify by zoom + merge same-color runs (one polyline per run instead of
+  // one per point).
+  for (const seg of buildTrackSegments(ordered, zoom)) {
+    segments.push(
+      new google.maps.Polyline({
+        map,
+        path: seg.path,
+        geodesic: true,
+        strokeColor: seg.colorHex,
+        strokeOpacity: 0.82,
+        strokeWeight: 6,
+        zIndex: 6,
+      }),
+    );
   }
 }
 
 function clearTrackSegments(segments: google.maps.Polyline[]): void {
   for (const segment of segments) segment.setMap(null);
-}
-
-// Input speed is m/s; thresholds are in km/h: 0–15 red, ~28 yellow, 40+ green.
-function colorForTrackSpeed(speedMps: number): string {
-  const stops = [
-    { speed: 0, color: [220, 38, 38] },
-    { speed: 15, color: [220, 38, 38] },
-    { speed: 28, color: [234, 179, 8] },
-    { speed: 40, color: [34, 197, 94] },
-    { speed: 200, color: [34, 197, 94] },
-  ] as const;
-  const value = Number.isFinite(speedMps) ? Math.max(0, speedMps * 3.6) : 0;
-
-  for (let index = 1; index < stops.length; index += 1) {
-    const previous = stops[index - 1];
-    const current = stops[index];
-    if (value <= current.speed) {
-      const ratio = (value - previous.speed) / (current.speed - previous.speed);
-      return rgbToHex(interpolateRgb(previous.color, current.color, ratio));
-    }
-  }
-
-  return rgbToHex(stops[stops.length - 1].color);
-}
-
-function interpolateRgb(
-  from: readonly [number, number, number],
-  to: readonly [number, number, number],
-  ratio: number,
-): [number, number, number] {
-  const clamped = Math.min(1, Math.max(0, ratio));
-  return [
-    Math.round(from[0] + (to[0] - from[0]) * clamped),
-    Math.round(from[1] + (to[1] - from[1]) * clamped),
-    Math.round(from[2] + (to[2] - from[2]) * clamped),
-  ];
-}
-
-function rgbToHex(rgb: readonly [number, number, number]): string {
-  return `#${rgb.map((part) => part.toString(16).padStart(2, '0')).join('')}`;
 }
 
 function toLatLng(location: LiveLocation | null): google.maps.LatLngLiteral | null {

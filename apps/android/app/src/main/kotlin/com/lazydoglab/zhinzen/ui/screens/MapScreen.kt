@@ -92,6 +92,8 @@ import com.lazydoglab.zhinzen.nearby.NearbyEstimate
 import com.lazydoglab.zhinzen.nearby.NearbyTrend
 import com.lazydoglab.zhinzen.nearby.UwbResult
 import com.lazydoglab.zhinzen.data.TrackPoint
+import com.lazydoglab.zhinzen.map.TrackSimplify
+import kotlin.math.roundToInt
 import com.lazydoglab.zhinzen.ui.theme.ZzColor
 
 @OptIn(ExperimentalPermissionsApi::class)
@@ -251,14 +253,17 @@ fun MapScreen(
             // Keep the Google logo + controls inside the system bars (edge-to-edge).
             contentPadding = WindowInsets.systemBars.asPaddingValues(),
         ) {
-            // Track as per-segment polylines colored by speed (mirrors the web).
-            for (i in 1 until trackPoints.size) {
-                val a = trackPoints[i - 1]
-                val b = trackPoints[i]
-                key(b.createdAt) {
+            // Track: simplify by zoom + merge same-color runs into one polyline each
+            // (keyed on integer zoom so it only recomputes on real zoom steps).
+            val zoomKey = cameraPositionState.position.zoom.roundToInt()
+            val trackSegments = remember(trackPoints.size, zoomKey) {
+                TrackSimplify.buildSegments(trackPoints, zoomKey.toFloat())
+            }
+            trackSegments.forEachIndexed { i, seg ->
+                key(i) {
                     Polyline(
-                        points = listOf(LatLng(a.lat, a.lng), LatLng(b.lat, b.lng)),
-                        color = colorForSpeed((a.speed + b.speed) / 2.0),
+                        points = seg.path,
+                        color = colorForSpeed(TrackSimplify.bucketSpeedMps(seg.bucket)),
                         width = 14f,
                     )
                 }
