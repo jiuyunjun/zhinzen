@@ -249,6 +249,17 @@ fun MapScreen(
         runCatching { cameraPositionState.animate(CameraUpdateFactory.newLatLngBounds(bounds, 200)) }
     }
 
+    // Frame self + the selected rally point, like selecting a member.
+    LaunchedEffect(selectedRallyId) {
+        val rally = rallyPoints.firstOrNull { it.id == selectedRallyId } ?: return@LaunchedEffect
+        val self = selfLocation ?: return@LaunchedEffect
+        val bounds = LatLngBounds.builder()
+            .include(LatLng(self.lat, self.lng))
+            .include(LatLng(rally.lat, rally.lng))
+            .build()
+        runCatching { cameraPositionState.animate(CameraUpdateFactory.newLatLngBounds(bounds, 200)) }
+    }
+
     Box(modifier = modifier.fillMaxSize()) {
         GoogleMap(
             modifier = Modifier.fillMaxSize(),
