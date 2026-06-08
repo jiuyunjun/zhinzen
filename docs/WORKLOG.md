@@ -5,6 +5,22 @@
 
 ---
 
+## 2026-06-05 — 文档持久化：把近期设计变更并入 design.md（规范）
+
+把散在 WORKLOG 的近期决策固化进 `design.md`(canonical 规范)：
+
+- 新增 **§2.4 邀请链接与深链（App Links）**：path 式 `/r/CODE`、assetlinks、intent 桥接、App 接收。
+- **§4.4** 增「在线状态 / 断连检测（RTDB onDisconnect + 离开显式写 not-sharing）」。
+- **§5.4** 增 km/h 颜色阈值、自适应采样、渲染优化（按缩放抽稀 + 同色段合并）。
+- **§5.7 UWB / §5.8 BLE**：从「计划」更新为「已实现」+ 具体做法（OOB over RTDB、去趋势方向估计、
+  连续发现、距离区间/趋势）。
+- **§8.4 Android 实现状态**：刷新为当前全貌(含 App Links、LEGACY 渲染器、bitmap marker 等)。
+- **§16** Phase 5 标记完成、Phase 6 标记已实现待调参。
+
+仅文档,无需构建。
+
+---
+
 ## 2026-06-05 — Android App Links：邀请链接装了就唤起 App,没装走网页 ✅（已部署/已编译）
 
 **目标**:点开 `https://zhinzen.lazydoglab.com/r/CODE`,装了 App → 直接进 App 对应房间;没装 → 网页。

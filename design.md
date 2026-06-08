@@ -103,6 +103,25 @@ https://example.com/r/{roomId}
 
 ---
 
+### 2.4 邀请链接与深链（App Links）
+
+邀请链接为 **path 式** `https://zhinzen.lazydoglab.com/r/{roomId}`（不再用 `#/r/` 片段，
+因为 Android App Links 无法匹配 URL fragment）。
+
+1. **网页**：`roomFromUrl` 同时解析 `pathname` 与旧的 `hash`（向后兼容）；`syncUrl` 用 path；
+   Firebase Hosting `**` 重写到 `index.html`（SPA）。
+2. **App Links**：`apps/web/public/.well-known/assetlinks.json`（含包名 + 签名 SHA-256）部署在
+   `lazydoglab.com` 与 `web.app`；Android Manifest 用 `autoVerify` intent-filter（host + `pathPrefix=/r/`）。
+   从**其它 App**（短信/记事本等）点链接 → 装了就直接进 App 对应房间，没装走网页。
+3. **浏览器 → App 桥接**：同标签浏览器导航不会自动唤起 App（Chrome 设计如此），故网页在安卓 +
+   邀请码时显示「在 App 中打开」按钮，用 `intent://…;S.browser_fallback_url=…;end`：装了开 App，
+   没装回落网页（带 `?web=1`，按钮自动隐藏）。
+4. **App 接收**：`MainActivity`(singleTop) 在 `onCreate/onNewIntent` 把深链交给 ViewModel；
+   有名字直接 `joinRoom`，没名字存 `pendingInvite` 等 onboarding 后加入。
+5. release 包需把 release 证书 SHA-256 也加进 `assetlinks.json`。详见 `docs/SECRETS.md`。
+
+---
+
 ## 3. 平台范围
 
 ### 3.1 Web
@@ -306,7 +325,7 @@ iOS 注意事项：
 
 位置上传策略：
 
-1. 移动明显时上传。
+1. 移动明显时上传（自适应采样，见 §5.4）。
 2. 固定时间间隔上传。
 3. 用户停止共享时停止上传。
 4. 页面关闭或 App 退出时更新在线状态。
@@ -314,6 +333,12 @@ iOS 注意事项：
 6. Web 页面进入后台时提示用户“浏览器后台可能暂停位置更新”。
 7. Web 页面回到前台时立即请求一次当前位置并上传。
 8. 真正可靠的后台持续共享放在 Android App 的 Foreground Service 实现。
+
+**在线状态 / 断连检测（已实现）**：用 RTDB `onDisconnect`（监听 `.info/connected` 重挂）——
+连接断开（杀进程 / 断网 / 关标签页）时服务端自动把 `liveLocations/{roomId}/{deviceId}.sharingLocation`
+置 `false`，对方 1–2 秒内即看到「未共享」，不必等 60s 过期。**离开房间**也显式写一次
+`sharingLocation=false`（web 由地图卸载清理触发，android 在 `leaveRoom` 写），与杀 App 行为一致。
+成员状态据此推导：在线 / 位置过期(stale) / 未共享 / 离线。
 
 建议上传频率：
 
@@ -447,7 +472,18 @@ MVP：保存最近 24 小时
 ```
 
 颜色计算以相邻轨迹点的速度或位移 / 时间差为基础。Web 端应优先使用上报的 `speed`，
-如果 `speed` 不可用或不可信，再用相邻点距离和时间差估算速度。轨迹线段颜色按速度做线性插值。
+如果 `speed` 不可用或不可信，再用相邻点距离和时间差估算速度。颜色阈值按 **km/h**：
+0–15 红、~28 黄、40+ 绿，区间渐变（早期用 m/s 阈值会导致城市速度一直偏红）。
+
+**自适应采样（上传端）**：不再固定间隔，改为「移动 ≥12m 即采点（速度越快越密，减少切角偏离）
++ 静止时每 20s 心跳 + 最短 2.5s 间隔防刷」。两端一致。
+
+**渲染优化（显示端，`geo-utils.buildTrackSegments` + Kotlin 镜像）**：原先每两点一条 Polyline
+（O(N) 绘制对象，点多即卡）。两个杠杆：
+
+1. **按缩放抽稀**：RDP 简化，容差 = `当前 zoom 每像素米数 × 2.5px`；缩小丢亚像素细节，放大恢复。
+2. **同色段合并**：速度量化成 8km/h 一档，连续同档点合并成**一条多点 Polyline** → 对象数降到
+   O(颜色切换次数)。Web 监听 `zoom_changed`（防抖）重算，Android 按整数 zoom `remember` 重算。
 
 ---
 
@@ -536,6 +572,15 @@ UWB 能力：
 4. UWB 适合近距离，不适合远距离。
 5. Web 不作为 UWB 实现平台。
 
+实现（`nearby/UwbRangingController`，`androidx.core.uwb`）：
+
+1. 仅 Android 12+ 且双方 `capabilities.uwb=true` 时启用；选中对方时启动。
+2. **带外协商（OOB）走 RTDB** `rooms/{roomId}/uwb/{pairKey}`：deviceId 字典序较小者为
+   controller（决定 channel / sessionId / sessionKey），另一方为 controlee，交换 `UwbAddress`。
+3. `prepareSession` 收 `RangingResult` → 精准距离(米) + azimuth(真实方位角)；UI 显示距离 +
+   方位箭头，优先于 BLE 估计。
+4. 待加固：OOB 节点清理、握手时序、release 证书；需两台 UWB 真机验证。
+
 ---
 
 ### 5.8 蓝牙距离 fallback
@@ -580,6 +625,17 @@ UWB 能力：
 精确 1.2 米
 精确 2.5 米
 ```
+
+实现（`nearby/BleRangingController` + `nearby/NearbyEstimator`）：
+
+1. **连续自动发现**：进房间即广播（manufacturer data 放 deviceId 的 SHA-256 前 4 字节 token）
+   + 扫描（BALANCED 省电），自动识别附近成员，成员条标「附近」，不需互点头像。
+2. **距离/趋势**：RSSI 做 EMA 平滑；路径损耗模型给**距离区间**（约 1–2/2–5/5–10/10–20/20+ 米，
+   不报精确值）；最近 6s 斜率给「正在靠近/远离」。
+3. **方向（启发式，去趋势 detrend）**：单手机无法直接测向；用慢基线减掉距离分量后，把
+   **残差** RSSI 按"用户面朝的罗盘方向"分桶——人体遮挡使面朝对方时残差更高，残差最大的扇区
+   ≈ 对方方向。需转身/走动采样多个扇区才收敛，是粗略提示（精准方向用 UWB）。
+4. 权限 `BLUETOOTH_SCAN/ADVERTISE/CONNECT`（Android 12+ 运行时）；阈值（TX/N、桶边界）需真机调。
 
 ---
 
@@ -946,28 +1002,28 @@ FOREGROUND_SERVICE_LOCATION
 
 ### 8.4 实现状态（截至当前）
 
-已实现（`apps/android`，Kotlin + Jetpack Compose）：
+已实现（`apps/android`，Kotlin + Jetpack Compose），功能与 Web 对齐并有 App 特有增强：
 
-1. 姓名输入、创建/加入房间（复用 asia-northeast1 的 Cloud Functions）、Google 地图、
-   成员列表/详情、距离、Google 导航、罗盘方向指针、改名、历史房间、共享开关、
-   查看所有人、track 取景、按速度渐变的彩色轨迹、地图旋转 + 指南针(heading-up)、
-   自适应轨迹采样、震动反馈、edge-to-edge。
+1. **基础**：姓名输入、创建/加入房间（复用 asia-northeast1 的 Cloud Functions）、Google 地图、
+   成员列表/详情、距离、Google 导航、罗盘方向指针、改名、历史房间（含当时成员首字母头像）、
+   共享开关、查看所有人、track 取景、彩色轨迹、地图旋转 + 指南针(heading-up)、震动反馈、
+   edge-to-edge、复制邀请链接（顶栏）、离开房间二次确认。
 2. **后台持续共享位置**：前台服务 `LocationSharingService`（`foregroundServiceType=location`），
    独立持有 Fused 定位采集 + 实时位置(RTDB)/轨迹(Functions)上传 + 常驻通知；在前台启动以
    适用「前台服务定位豁免」，配合系统「始终允许」后台定位可长时间后台运行。VM 不再自行采集，
    `ownLocation` 由成员实时数据回显推导。
 3. **能力检测**：UWB（`android.hardware.uwb` + Android 12+）、BLE（`FEATURE_BLUETOOTH_LE`）
    真实检测并写入成员 `capabilities`，跨端可见（网页能力标签据此显示）。
+4. **近距离找人（已实现，详见 §5.7/§5.8）**：进房间即连续 BLE 广播+扫描自动发现附近成员；
+   `NearbyEstimator` 融合 RSSI(平滑) + 罗盘给出粗距离区间/趋势/方向；双方支持 UWB 时
+   通过 RTDB 带外协商建立 ranging session 给精准距离+方位。
+5. **渲染/兼容**：强制 LEGACY 地图渲染器（LATEST 经 Play 服务下发，在部分机型画不出自定义
+   marker）；头像 marker 用 `BitmapDescriptorFactory.fromBitmap` 实绘（不用实验性 MarkerComposable）；
+   轨迹按缩放抽稀 + 同色段合并（见 §5.4）。
+6. **App Links**：邀请链接深链直接唤起 App（见 §2.4）。
 
-近距离 UWB / 蓝牙测距（**计划，尚未实现**）：
-
-1. 触发条件：双方同房间、彼此 `capabilities` 支持、距离足够近（先用 GPS 距离粗判）。
-2. 带外协商（OOB）：通过现有后端做信令（如 RTDB `rooms/{roomId}/nearby/{deviceId}`）
-   交换 UWB 地址/会话参数或 BLE 标识。
-3. UWB：`androidx.core.uwb`（alpha）建立 ranging session → 精准相对距离/方向；仅双方都支持时。
-4. BLE fallback：广播房间内标识 + 扫描，RSSI → 粗略距离桶（很近/较近/较远/信号弱），
-   不展示精确米数（见 §5.8）。
-5. 权限：`BLUETOOTH_SCAN/CONNECT/ADVERTISE`、`UWB_RANGING` 按需、仅在设备支持时请求。
+> 共享算法尽量放进 `@zhinzen/geo-utils`（TS）并在 Kotlin 侧镜像（轨迹简化、分档、方向估计），
+> 保证 web/android 行为一致。
 
 ---
 
@@ -1366,33 +1422,20 @@ MVP 可先简化，后续必须补强。
 
 ---
 
-### Phase 5：Android App
+### Phase 5：Android App ✅（已完成，功能对齐 Web）
 
-目标：
-
-1. Android 项目初始化。
-2. 复用设计 token。
-3. 实现地图。
-4. 实现位置共享。
-5. 实现方向指针。
-6. 与 Web 后端数据互通。
-
-完成后 commit。
+1. ~~Android 项目初始化~~、~~复用设计 token~~、~~地图~~、~~位置共享（含后台前台服务）~~、
+   ~~方向指针~~、~~与 Web 后端数据互通~~。
+2. 另含 App 特有：后台持续定位、复制邀请、离开确认、历史成员头像、App Links 等（见 §8.4）。
 
 ---
 
-### Phase 6：UWB / 蓝牙
+### Phase 6：UWB / 蓝牙 🟡（已实现，待真机调参）
 
-目标：
-
-1. Android UWB 能力检测。
-2. UWB 近距离测距和方向。
-3. 蓝牙扫描。
-4. 蓝牙 RSSI 距离估算。
-5. UWB 不可用时 fallback。
-6. UI 显示能力状态。
-
-完成后 commit。
+1. ~~Android UWB 能力检测~~、~~UWB 近距离测距和方向~~（RTDB OOB 协商，见 §5.7）。
+2. ~~蓝牙扫描 + RSSI 距离估算~~、~~UWB 不可用时 fallback~~、~~UI 显示能力状态~~（见 §5.8）。
+3. 进房间连续 BLE 自动发现 + 去趋势方向估计。
+4. **待办**：两台真机实测调参（TX/N、桶边界、UWB OOB 时序/清理）、release 证书加入 assetlinks。
 
 ---
 
