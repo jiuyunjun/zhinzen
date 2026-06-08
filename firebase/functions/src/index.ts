@@ -56,6 +56,8 @@ interface RoomResponse {
   expiresAt: number;
   maxMembers: number;
   trackRetentionMinutes: number;
+  /** Device id of the room creator (owner) — clients use this to gate kick/delete. */
+  createdByDeviceId: string;
 }
 
 interface AppendTrackPointRequest {
@@ -307,6 +309,7 @@ export const createRoom = onCall(async (request): Promise<RoomResponse> => {
         expiresAt,
         maxMembers: DEFAULT_MAX_MEMBERS,
         trackRetentionMinutes: DEFAULT_TRACK_RETENTION_MINUTES,
+        createdByDeviceId: payload.deviceId,
       };
     } catch (error) {
       if (error instanceof HttpsError && error.code === 'already-exists') {
@@ -388,8 +391,53 @@ export const joinRoom = onCall(async (request): Promise<RoomResponse> => {
         typeof room.trackRetentionMinutes === 'number'
           ? room.trackRetentionMinutes
           : DEFAULT_TRACK_RETENTION_MINUTES,
+      createdByDeviceId:
+        typeof room.createdByDeviceId === 'string' ? room.createdByDeviceId : '',
     };
   });
+});
+
+/**
+ * Kick a member: only the room creator may remove someone. Deletes the target's
+ * member doc + device session and their RTDB live location + tracks. The target's
+ * client notices it's no longer a member and leaves. (No ban — they can rejoin.)
+ */
+export const kickMember = onCall(async (request): Promise<{ ok: true }> => {
+  const data = request.data && typeof request.data === 'object' ? (request.data as Record<string, unknown>) : {};
+  const roomId = normalizeRoomId(requireString(data.roomId, 'roomId', 64));
+  const deviceId = requireString(data.deviceId, 'deviceId', 128);
+  const deviceSecret = requireString(data.deviceSecret, 'deviceSecret', 256);
+  const targetDeviceId = requireString(data.targetDeviceId, 'targetDeviceId', 128);
+
+  if (!roomId) throw new HttpsError('invalid-argument', 'roomId is required.');
+  if (targetDeviceId === deviceId) throw new HttpsError('invalid-argument', 'Cannot kick yourself.');
+
+  const roomRef = db.collection('rooms').doc(roomId);
+  const [roomSnap, sessionSnap] = await Promise.all([
+    roomRef.get(),
+    roomRef.collection('deviceSessions').doc(deviceId).get(),
+  ]);
+  const room = roomSnap.data();
+  if (!room || room.status !== 'active') {
+    throw new HttpsError('not-found', 'Room is not active.');
+  }
+  if (sessionSnap.data()?.secretHash !== hashSecret(roomId, deviceId, deviceSecret)) {
+    throw new HttpsError('permission-denied', 'Device session does not match.');
+  }
+  if (room.createdByDeviceId !== deviceId) {
+    throw new HttpsError('permission-denied', 'Only the room creator can kick members.');
+  }
+
+  await Promise.all([
+    roomRef.collection('members').doc(targetDeviceId).delete(),
+    roomRef.collection('deviceSessions').doc(targetDeviceId).delete(),
+  ]);
+  const rtdb = getDatabaseWithUrl(RTDB_URL, app);
+  await Promise.all([
+    rtdb.ref(`liveLocations/${roomId}/${targetDeviceId}`).remove(),
+    rtdb.ref(`tracks/${roomId}/${targetDeviceId}`).remove(),
+  ]);
+  return { ok: true };
 });
 
 /**
@@ -414,6 +462,7 @@ export const pruneExpiredRooms = onSchedule('every 60 minutes', async () => {
       rtdb.ref(`liveLocations/${roomId}`).remove(),
       rtdb.ref(`tracks/${roomId}`).remove(),
       rtdb.ref(`rooms/${roomId}`).remove(),
+      rtdb.ref(`rallyPoints/${roomId}`).remove(),
     ]);
     await doc.ref.update({ status: 'expired' });
   }

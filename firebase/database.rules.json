@@ -15,6 +15,22 @@
           "updatedAt": { ".validate": "newData.isNumber()" },
           "sharingLocation": { ".validate": "newData.isBoolean()" },
           "displayName": { ".validate": "newData.isString()" },
+          "battery": { ".validate": "(newData.isNumber() && newData.val() >= 0 && newData.val() <= 100) || newData.val() === null" },
+          "$other": { ".validate": false }
+        }
+      }
+    },
+    "rallyPoints": {
+      "$roomId": {
+        ".read": true,
+        "$pointId": {
+          ".write": true,
+          ".validate": "!newData.exists() || newData.hasChildren(['name', 'lat', 'lng', 'createdByDeviceId', 'createdAt'])",
+          "name": { ".validate": "newData.isString() && newData.val().length <= 60" },
+          "lat": { ".validate": "newData.isNumber() && newData.val() >= -90 && newData.val() <= 90" },
+          "lng": { ".validate": "newData.isNumber() && newData.val() >= -180 && newData.val() <= 180" },
+          "createdByDeviceId": { ".validate": "newData.isString()" },
+          "createdAt": { ".validate": "newData.isNumber()" },
           "$other": { ".validate": false }
         }
       }
