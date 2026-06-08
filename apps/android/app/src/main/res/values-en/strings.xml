@@ -22,6 +22,10 @@
     <string name="kicked_from_room">You were removed from the room</string>
     <string name="kick_member">Remove member</string>
     <string name="battery_label">Battery</string>
+    <string name="new_rally">New rally point</string>
+    <string name="rally_default_name">Rally point</string>
+    <string name="delete_rally">Delete rally point</string>
+    <string name="create">Create</string>
     <string name="leave_room">Leave room</string>
     <string name="cancel">Cancel</string>
     <string name="leave_confirm_title">Leave room?</string>

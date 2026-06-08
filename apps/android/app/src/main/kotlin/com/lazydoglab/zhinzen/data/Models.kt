@@ -37,6 +37,15 @@ data class LiveLocation(
     val battery: Int? = null,
 )
 
+data class RallyPoint(
+    val id: String = "",
+    val name: String = "",
+    val lat: Double = 0.0,
+    val lng: Double = 0.0,
+    val createdByDeviceId: String = "",
+    val createdAt: Long = 0,
+)
+
 data class TrackPoint(
     val lat: Double = 0.0,
     val lng: Double = 0.0,

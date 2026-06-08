@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { TrackPoint } from '@zhinzen/shared-types';
-import { color as tokens, font, mapThemes } from '@zhinzen/shared-ui';
+import type { RallyPoint, TrackPoint } from '@zhinzen/shared-types';
+import { color as tokens, font, mapThemes, withAlpha } from '@zhinzen/shared-ui';
 import { useDeviceStore } from '../../state/deviceStore';
 import { useLocationStore } from '../../state/locationStore';
 import { useMembersStore } from '../../state/membersStore';
@@ -15,8 +15,9 @@ import { haptics } from '../../lib/haptics';
 import { formatRoomCode, inviteLink } from '../../lib/roomCode';
 import { updateRoomMembers } from '../../lib/roomHistory';
 import { fetchRecentTrackPoints } from '../../lib/trackApi';
+import { createRallyPoint, deleteRallyPoint, watchRallyPoints } from '../../lib/rallyApi';
 import { GoogleMapView } from './GoogleMapView';
-import { MemberDetailPanel } from './MemberDetailPanel';
+import { MemberDetailPanel, RallyDetailPanel } from './MemberDetailPanel';
 import { MemberStrip } from './MemberStrip';
 
 /**
@@ -54,6 +55,9 @@ export function MapScreen({ onLeave }: { onLeave: () => void }) {
   const [mapHeading, setMapHeading] = useState(0);
   const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
   const [trackPoints, setTrackPoints] = useState<TrackPoint[]>([]);
+  const [rallyPoints, setRallyPoints] = useState<RallyPoint[]>([]);
+  const [selectedRallyId, setSelectedRallyId] = useState<string | null>(null);
+  const [pendingRally, setPendingRally] = useState<{ lat: number; lng: number } | null>(null);
   // Continuous (unwrapped) map heading so the compass needle takes the short way
   // across north instead of spinning ~360° when getHeading() wraps 359°→0°.
   const headingAccum = useRef({ prevRaw: 0, continuous: 0 });
@@ -110,6 +114,41 @@ export function MapScreen({ onLeave }: { onLeave: () => void }) {
   const onKick = (targetDeviceId: string) => {
     setSelectedDeviceId(null);
     void kickMember(targetDeviceId).catch(() => flash(t('kickFailed')));
+  };
+
+  // Rally points: subscribe while in the room.
+  useEffect(() => {
+    if (!roomId) return;
+    return watchRallyPoints(roomId, setRallyPoints);
+  }, [roomId]);
+
+  const selectedRally = useMemo(
+    () => rallyPoints.find((p) => p.id === selectedRallyId) ?? null,
+    [rallyPoints, selectedRallyId],
+  );
+
+  const onLongPress = (lat: number, lng: number) => {
+    setSelectedDeviceId(null);
+    setSelectedRallyId(null);
+    haptics.tap();
+    setPendingRally({ lat, lng });
+  };
+  const onConfirmRally = (name: string) => {
+    const at = pendingRally;
+    setPendingRally(null);
+    if (!at || !roomId) return;
+    void createRallyPoint(roomId, { name, lat: at.lat, lng: at.lng, createdByDeviceId: deviceId })
+      .then(() => haptics.success())
+      .catch(() => flash(t('rallyFailed')));
+  };
+  const onSelectRally = (id: string) => {
+    setSelectedDeviceId(null);
+    setSelectedRallyId(id);
+    setFollowMode('free');
+  };
+  const onDeleteRally = (id: string) => {
+    setSelectedRallyId(null);
+    if (roomId) void deleteRallyPoint(roomId, id).then(() => haptics.tap());
   };
 
   // Capture member names for the room-history avatar previews.
@@ -296,7 +335,10 @@ export function MapScreen({ onLeave }: { onLeave: () => void }) {
         deviceHeading={headingUp ? sensorHeading : null}
         selectedDeviceId={selectedDeviceId}
         trackPoints={trackPoints}
+        rallyPoints={rallyPoints}
         onSelectMember={onSelectMember}
+        onSelectRally={onSelectRally}
+        onLongPress={onLongPress}
         onUserPan={() => setFollowMode('free')}
         onHeadingChange={onMapHeadingChange}
       />
@@ -437,6 +479,16 @@ export function MapScreen({ onLeave }: { onLeave: () => void }) {
             onLeaveRoom={onLeave}
             onRename={onRename}
           />
+        ) : selectedRally ? (
+          <RallyDetailPanel
+            point={selectedRally}
+            ownLocation={effectiveOwnLocation}
+            canDelete={
+              selectedRally.createdByDeviceId === deviceId || createdByDeviceId === deviceId
+            }
+            onDelete={() => onDeleteRally(selectedRally.id)}
+            onClose={() => setSelectedRallyId(null)}
+          />
         ) : (
           <MemberStrip
             members={members}
@@ -444,11 +496,115 @@ export function MapScreen({ onLeave }: { onLeave: () => void }) {
             sharing={sharing}
             selectedDeviceId={selectedDeviceId}
             onSelect={onSelectMember}
+            rallyPoints={rallyPoints}
+            selectedRallyId={selectedRallyId}
+            onSelectRally={onSelectRally}
           />
         )}
       </div>
 
+      {pendingRally && (
+        <RallyNameDialog
+          initial={t('rallyDefaultName')}
+          onCancel={() => setPendingRally(null)}
+          onConfirm={onConfirmRally}
+        />
+      )}
+
       <Toast msg={msg} />
+    </div>
+  );
+}
+
+function RallyNameDialog({
+  initial,
+  onCancel,
+  onConfirm,
+}: {
+  initial: string;
+  onCancel: () => void;
+  onConfirm: (name: string) => void;
+}) {
+  const t = useUiStore((s) => s.t);
+  const [name, setName] = useState(initial);
+  return (
+    <div
+      onClick={onCancel}
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 60,
+        background: 'rgba(0,0,0,0.35)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 24,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{ background: '#fff', borderRadius: 18, padding: 18, width: '100%', maxWidth: 320 }}
+      >
+        <div style={{ fontWeight: 700, fontSize: 16, color: tokens.ink, marginBottom: 12 }}>
+          {t('newRally')}
+        </div>
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          autoFocus
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && name.trim()) onConfirm(name.trim());
+          }}
+          style={{
+            width: '100%',
+            height: 44,
+            boxSizing: 'border-box',
+            padding: '0 14px',
+            fontSize: 15,
+            fontFamily: 'inherit',
+            border: `1.5px solid ${tokens.line}`,
+            borderRadius: 12,
+            outline: 'none',
+          }}
+        />
+        <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
+          <button
+            type="button"
+            onClick={onCancel}
+            style={{
+              flex: 1,
+              height: 42,
+              borderRadius: 12,
+              border: `1.5px solid ${tokens.line}`,
+              background: '#fff',
+              color: tokens.inkSoft,
+              fontFamily: 'inherit',
+              fontWeight: 700,
+              cursor: 'pointer',
+            }}
+          >
+            {t('cancel')}
+          </button>
+          <button
+            type="button"
+            disabled={!name.trim()}
+            onClick={() => onConfirm(name.trim())}
+            style={{
+              flex: 1,
+              height: 42,
+              borderRadius: 12,
+              border: 'none',
+              background: name.trim() ? '#7c3aed' : withAlpha(tokens.offline, 0.2),
+              color: name.trim() ? '#fff' : tokens.inkFaint,
+              fontFamily: 'inherit',
+              fontWeight: 700,
+              cursor: name.trim() ? 'pointer' : 'default',
+            }}
+          >
+            {t('create')}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

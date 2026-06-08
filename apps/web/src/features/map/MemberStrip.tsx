@@ -1,3 +1,4 @@
+import type { RallyPoint } from '@zhinzen/shared-types';
 import { color as tokens, font, withAlpha } from '@zhinzen/shared-ui';
 import type { MemberView, MemberViewStatus } from '../../state/membersStore';
 import { useUiStore } from '../../state/uiStore';
@@ -12,12 +13,18 @@ export function MemberStrip({
   sharing,
   selectedDeviceId,
   onSelect,
+  rallyPoints = [],
+  selectedRallyId = null,
+  onSelectRally,
 }: {
   members: MemberView[];
   selfName: string;
   sharing: boolean;
   selectedDeviceId: string | null;
   onSelect: (deviceId: string) => void;
+  rallyPoints?: RallyPoint[];
+  selectedRallyId?: string | null;
+  onSelectRally?: (id: string) => void;
 }) {
   const t = useUiStore((s) => s.t);
   const me = selfName.trim() || t('you');
@@ -72,6 +79,14 @@ export function MemberStrip({
             member={member}
             selected={member.member.deviceId === selectedDeviceId}
             onSelect={onSelect}
+          />
+        ))}
+        {rallyPoints.map((point) => (
+          <RallyChip
+            key={point.id}
+            point={point}
+            selected={point.id === selectedRallyId}
+            onSelect={() => onSelectRally?.(point.id)}
           />
         ))}
       </div>
@@ -161,6 +176,66 @@ function MemberChip({
         <div style={{ fontFamily: font.mono, fontSize: 10.5, color: statusColor, marginTop: 1 }}>
           {labelForStatus(member.status, t)}
         </div>
+      </div>
+    </button>
+  );
+}
+
+function RallyChip({
+  point,
+  selected,
+  onSelect,
+}: {
+  point: RallyPoint;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        gap: 7,
+        width: 72,
+        flexShrink: 0,
+        border: 'none',
+        padding: '2px 0',
+        borderRadius: 14,
+        background: selected ? withAlpha('#7c3aed', 0.1) : 'transparent',
+        cursor: 'pointer',
+        fontFamily: 'inherit',
+      }}
+    >
+      <div
+        style={{
+          width: 44,
+          height: 44,
+          borderRadius: 15,
+          background: '#7c3aed',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          fontSize: 22,
+          boxShadow: `0 0 0 2.5px ${withAlpha('#7c3aed', 0.16)}`,
+        }}
+      >
+        📍
+      </div>
+      <div
+        style={{
+          fontSize: 12.5,
+          fontWeight: 600,
+          color: tokens.ink,
+          whiteSpace: 'nowrap',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          maxWidth: 72,
+        }}
+      >
+        {point.name}
       </div>
     </button>
   );

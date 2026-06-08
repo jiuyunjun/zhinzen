@@ -5,6 +5,32 @@
 
 ---
 
+## 2026-06-05 — 四个新功能：踢人 / 加入提醒 / 电量 / 集结点（web+app）✅
+
+确认的产品决策：加入提醒=仅应用内、踢出=仅移除(可重进)、集结点=可多个。
+
+**后端**（已部署）：`createRoom/joinRoom` 返回 `createdByDeviceId`;新 callable `kickMember`
+(仅房主,删成员 doc+session+RTDB live/tracks);RTDB 规则新增 `rallyPoints`(创建/删除/校验) +
+liveLocations 的 `battery` 字段;`pruneExpiredRooms` 也清 `rallyPoints/{room}`。
+
+**1) 踢人**：成员详情(房主看非自己)出现「踢出」;`kickMember` 调函数。被踢端通过成员列表里
+没有自己 → 自动离开 + 提示。createdByDeviceId 从 create/join 带回存进 store/VM。
+
+**2) 新成员加入提醒**：diff 成员列表,新成员 → 全员应用内 Toast/flash + 成功震动(仅应用内)。
+同一逻辑也做了「被踢检测」。
+
+**3) 电量**：上报 liveLocation 带 `battery`(web Battery Status API;android BatteryManager);
+成员详情显示。iOS/Firefox 无该 API → 不显示。
+
+**4) 集结点（多个）**：RTDB `rallyPoints/{room}/{id}`,直写。**长按地图**新增(web 用 map
+`contextmenu`,android `onMapLongClick`),弹框命名。地图上紫色标 + 底部列表「📍名字」可点,
+详情看距离/方向/导航,创建者或房主可删。`@zhinzen/geo-utils` 加 `RallyPoint` 类型。
+
+**验证**：functions+rules 已部署;web build+deploy ✅;android `assembleDebug` ✅。
+⚠️ 安全:rally 直写与 liveLocations 同等(仅格式校验);删除靠 UI 门禁(创建者/房主),规则层不强校验。
+
+---
+
 ## 2026-06-05 — 轨迹改存 RTDB（方案 A）+ 定时清理 + 修 UWB 规则 ✅（已部署）
 
 **动机**：轨迹是高频 append，Firestore 按写计费贵（开车每点 3 写、~2.5s 一次）。RTDB 不按操作

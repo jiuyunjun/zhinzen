@@ -21,6 +21,7 @@ import com.lazydoglab.zhinzen.data.MemberView
 import com.lazydoglab.zhinzen.data.RoomCode
 import com.lazydoglab.zhinzen.data.RoomHistory
 import com.lazydoglab.zhinzen.data.RoomHistoryEntry
+import com.lazydoglab.zhinzen.data.RallyPoint
 import com.lazydoglab.zhinzen.data.RoomMember
 import com.lazydoglab.zhinzen.data.TrackPoint
 import com.lazydoglab.zhinzen.data.deriveStatus
@@ -85,6 +86,14 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     var createdByDeviceId by mutableStateOf<String?>(null)
         private set
     val isOwner: Boolean get() = createdByDeviceId != null && createdByDeviceId == deviceId
+    /** Shared rally points in this room. */
+    var rallyPoints by mutableStateOf<List<RallyPoint>>(emptyList())
+        private set
+    var selectedRallyId by mutableStateOf<String?>(null)
+        private set
+    /** Pending long-press location awaiting a name (lat to lng), or null. */
+    var pendingRally by mutableStateOf<Pair<Double, Double>?>(null)
+        private set
     /** Device compass heading (degrees, 0 = north), or null if unavailable. */
     var deviceHeading by mutableStateOf<Float?>(null)
         private set
@@ -113,6 +122,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private var membersReg: ListenerRegistration? = null
     private var liveRef: DatabaseReference? = null
     private var liveListener: ValueEventListener? = null
+    private var rallyRef: DatabaseReference? = null
+    private var rallyListener: ValueEventListener? = null
     private var compassJob: Job? = null
 
     private fun currentIdentity(): DeviceIdentity = identity.copy(displayName = displayName)
@@ -220,6 +231,45 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         nearbyUwb = null
     }
 
+    // --- Rally points ---
+    fun startRally(lat: Double, lng: Double) {
+        selectedDeviceId = null
+        selectedRallyId = null
+        haptics.tap()
+        pendingRally = lat to lng
+    }
+
+    fun cancelRally() {
+        pendingRally = null
+    }
+
+    fun confirmRally(name: String) {
+        val at = pendingRally ?: return
+        val rid = roomId ?: return
+        pendingRally = null
+        viewModelScope.launch {
+            runCatching { Backend.createRally(rid, name.ifBlank { "集结点" }, at.first, at.second, deviceId) }
+                .onSuccess { haptics.success() }
+        }
+    }
+
+    fun selectRally(id: String?) {
+        selectedRallyId = id
+        if (id != null) {
+            selectedDeviceId = null
+            haptics.light()
+        }
+        updateCompass()
+    }
+
+    fun deleteRally(id: String) {
+        val rid = roomId ?: return
+        val rp = rallyPoints.firstOrNull { it.id == id } ?: return
+        if (rp.createdByDeviceId != deviceId && !isOwner) return
+        selectedRallyId = null
+        viewModelScope.launch { runCatching { Backend.deleteRally(rid, id) }.onSuccess { haptics.tap() } }
+    }
+
     /** Owner-only: remove a member from the room. */
     fun kickMember(targetDeviceId: String) {
         val rid = roomId ?: return
@@ -242,7 +292,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     /** The compass runs while in heading-up mode or while pointing at another member. */
     private fun updateCompass() {
-        val wanted = headingUp || (selectedDeviceId != null && selectedDeviceId != deviceId)
+        val wanted =
+            headingUp || (selectedDeviceId != null && selectedDeviceId != deviceId) || selectedRallyId != null
         if (wanted) startCompass() else stopCompass()
     }
 
@@ -424,6 +475,26 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         ref.addValueEventListener(listener)
         liveRef = ref
         liveListener = listener
+
+        val rRef = Backend.database.getReference("rallyPoints/$roomId")
+        val rListener =
+            object : ValueEventListener {
+                override fun onDataChange(snapshot: DataSnapshot) {
+                    rallyPoints =
+                        snapshot.children.mapNotNull { child ->
+                            val rp = child.getValue(RallyPoint::class.java) ?: return@mapNotNull null
+                            rp.copy(id = child.key ?: return@mapNotNull null)
+                        }.sortedBy { it.createdAt }
+                    if (selectedRallyId != null && rallyPoints.none { it.id == selectedRallyId }) {
+                        selectedRallyId = null
+                    }
+                }
+
+                override fun onCancelled(error: DatabaseError) {}
+            }
+        rRef.addValueEventListener(rListener)
+        rallyRef = rRef
+        rallyListener = rListener
     }
 
     private fun stopWatching() {
@@ -432,6 +503,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         liveListener?.let { liveRef?.removeEventListener(it) }
         liveRef = null
         liveListener = null
+        rallyListener?.let { rallyRef?.removeEventListener(it) }
+        rallyRef = null
+        rallyListener = null
+        rallyPoints = emptyList()
+        selectedRallyId = null
         memberDocs = emptyList()
         liveLocations = emptyMap()
     }

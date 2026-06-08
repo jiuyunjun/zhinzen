@@ -88,6 +88,7 @@ import com.lazydoglab.zhinzen.data.Geo
 import com.lazydoglab.zhinzen.data.LiveLocation
 import com.lazydoglab.zhinzen.data.MemberStatus
 import com.lazydoglab.zhinzen.data.MemberView
+import com.lazydoglab.zhinzen.data.RallyPoint
 import com.lazydoglab.zhinzen.data.RoomCode
 import com.lazydoglab.zhinzen.nearby.NearbyEstimate
 import com.lazydoglab.zhinzen.nearby.NearbyTrend
@@ -112,11 +113,19 @@ fun MapScreen(
     nearbyUwb: UwbResult?,
     nearbyScanning: Boolean,
     isOwner: Boolean,
+    rallyPoints: List<RallyPoint>,
+    selectedRallyId: String?,
+    pendingRally: Pair<Double, Double>?,
     onLeave: () -> Unit,
     onPermissionGranted: () -> Unit,
     onSelectMember: (String?) -> Unit,
     onRename: (String) -> Unit,
     onKick: (String) -> Unit,
+    onLongPress: (Double, Double) -> Unit,
+    onSelectRally: (String?) -> Unit,
+    onConfirmRally: (String) -> Unit,
+    onCancelRally: () -> Unit,
+    onDeleteRally: (String) -> Unit,
     onToggleSharing: () -> Unit,
     onToggleHeadingUp: () -> Unit,
     modifier: Modifier = Modifier,
@@ -255,7 +264,23 @@ fun MapScreen(
             ),
             // Keep the Google logo + controls inside the system bars (edge-to-edge).
             contentPadding = WindowInsets.systemBars.asPaddingValues(),
+            onMapLongClick = { onLongPress(it.latitude, it.longitude) },
         ) {
+            rallyPoints.forEach { rp ->
+                key("rally-${rp.id}") {
+                    val st = rememberMarkerState(position = LatLng(rp.lat, rp.lng))
+                    LaunchedEffect(rp.lat, rp.lng) { st.position = LatLng(rp.lat, rp.lng) }
+                    Marker(
+                        state = st,
+                        icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_VIOLET),
+                        title = rp.name,
+                        onClick = {
+                            onSelectRally(rp.id)
+                            true
+                        },
+                    )
+                }
+            }
             // Track: simplify by zoom + merge same-color runs into one polyline each
             // (keyed on integer zoom so it only recomputes on real zoom steps).
             val zoomKey = cameraPositionState.position.zoom.roundToInt()
@@ -402,6 +427,8 @@ fun MapScreen(
                 .navigationBarsPadding()
                 .padding(horizontal = 18.dp, vertical = 14.dp),
         ) {
+            val selectedRally = rallyPoints.firstOrNull { it.id == selectedRallyId }
+            val selfId = members.firstOrNull { it.isSelf }?.member?.deviceId
             if (selected != null) {
                 MemberDetail(
                     member = selected,
@@ -416,19 +443,39 @@ fun MapScreen(
                     onRename = onRename,
                     onLeave = { showLeaveConfirm = true },
                 )
+            } else if (selectedRally != null) {
+                RallyDetail(
+                    point = selectedRally,
+                    selfLocation = selfLocation,
+                    deviceHeading = deviceHeading,
+                    canDelete = selectedRally.createdByDeviceId == selfId || isOwner,
+                    onDelete = { onDeleteRally(selectedRally.id) },
+                )
             } else {
                 MemberStrip(
                     members = members,
                     nearbyIds = nearbyEstimates.keys,
+                    rallyPoints = rallyPoints,
                     onSelect = onSelectMember,
+                    onSelectRally = onSelectRally,
                 )
             }
+        }
+
+        if (pendingRally != null) {
+            RallyNameDialog(onConfirm = onConfirmRally, onCancel = onCancelRally)
         }
     }
 }
 
 @Composable
-private fun MemberStrip(members: List<MemberView>, nearbyIds: Set<String>, onSelect: (String) -> Unit) {
+private fun MemberStrip(
+    members: List<MemberView>,
+    nearbyIds: Set<String>,
+    rallyPoints: List<RallyPoint>,
+    onSelect: (String) -> Unit,
+    onSelectRally: (String?) -> Unit,
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -462,6 +509,34 @@ private fun MemberStrip(members: List<MemberView>, nearbyIds: Set<String>, onSel
                         fontWeight = FontWeight.SemiBold,
                     )
                 }
+            }
+        }
+        rallyPoints.forEach { rp ->
+            Column(
+                modifier = Modifier
+                    .width(72.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .clickable { onSelectRally(rp.id) }
+                    .padding(vertical = 6.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(46.dp)
+                        .clip(CircleShape)
+                        .background(ZzColor.Target),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(text = "📍", fontSize = 22.sp)
+                }
+                Text(
+                    text = rp.name,
+                    color = ZzColor.Ink,
+                    fontSize = 12.sp,
+                    maxLines = 1,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.padding(top = 6.dp),
+                )
             }
         }
     }
@@ -545,6 +620,82 @@ private fun SelfEditor(member: MemberView, onRename: (String) -> Unit, onLeave: 
     ) {
         Text(stringResource(R.string.leave_room), color = ZzColor.Danger)
     }
+}
+
+@Composable
+private fun RallyDetail(
+    point: RallyPoint,
+    selfLocation: LiveLocation?,
+    deviceHeading: Float?,
+    canDelete: Boolean,
+    onDelete: () -> Unit,
+) {
+    val context = LocalContext.current
+    val distance =
+        if (selfLocation != null) {
+            Geo.formatDistance(Geo.distanceMeters(selfLocation.lat, selfLocation.lng, point.lat, point.lng))
+        } else {
+            "—"
+        }
+    val relative: Float? =
+        if (selfLocation != null && deviceHeading != null) {
+            (Geo.bearingDegrees(selfLocation.lat, selfLocation.lng, point.lat, point.lng).toFloat() - deviceHeading + 360f) % 360f
+        } else {
+            null
+        }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(text = "📍 ${point.name}", color = ZzColor.Ink, fontSize = 16.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+    }
+    Row(
+        modifier = Modifier.padding(top = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        DirectionPointer(relative)
+        Metric(label = stringResource(R.string.distance), value = distance, modifier = Modifier.weight(1f))
+    }
+    Button(
+        onClick = {
+            val uri =
+                Uri.parse("https://www.google.com/maps/dir/?api=1&destination=${point.lat},${point.lng}&travelmode=walking")
+            context.startActivity(Intent(Intent.ACTION_VIEW, uri))
+        },
+        modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+    ) {
+        Text(stringResource(R.string.navigate))
+    }
+    if (canDelete) {
+        OutlinedButton(
+            onClick = onDelete,
+            modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFDC2626)),
+        ) {
+            Text(stringResource(R.string.delete_rally))
+        }
+    }
+}
+
+@Composable
+private fun RallyNameDialog(onConfirm: (String) -> Unit, onCancel: () -> Unit) {
+    var name by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onCancel,
+        title = { Text(stringResource(R.string.new_rally)) },
+        text = {
+            OutlinedTextField(
+                value = name,
+                onValueChange = { name = it },
+                singleLine = true,
+                placeholder = { Text(stringResource(R.string.rally_default_name)) },
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = { onConfirm(name.trim().ifBlank { "集结点" }) }) {
+                Text(stringResource(R.string.create))
+            }
+        },
+        dismissButton = { TextButton(onClick = onCancel) { Text(stringResource(R.string.cancel)) } },
+    )
 }
 
 @Composable

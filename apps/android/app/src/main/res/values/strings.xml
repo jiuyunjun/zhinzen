@@ -23,6 +23,10 @@
     <string name="kicked_from_room">你已被移出房间</string>
     <string name="kick_member">踢出该成员</string>
     <string name="battery_label">电量</string>
+    <string name="new_rally">新建集结点</string>
+    <string name="rally_default_name">集结点</string>
+    <string name="delete_rally">删除集结点</string>
+    <string name="create">创建</string>
     <string name="leave_room">离开房间</string>
     <string name="cancel">取消</string>
     <string name="leave_confirm_title">离开房间？</string>

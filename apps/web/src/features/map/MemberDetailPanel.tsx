@@ -5,7 +5,7 @@ import {
   calculateRelativeDirection,
   formatDistance,
 } from '@zhinzen/geo-utils';
-import type { DeviceCapabilities, LiveLocation } from '@zhinzen/shared-types';
+import type { DeviceCapabilities, LiveLocation, RallyPoint } from '@zhinzen/shared-types';
 import { color as tokens, font, withAlpha } from '@zhinzen/shared-ui';
 
 import { Icon } from '../../components/Icon';
@@ -364,6 +364,101 @@ function OtherPanel({
           }}
         >
           {t('kickMember')}
+        </button>
+      )}
+    </section>
+  );
+}
+
+/** Detail panel for a rally point — distance/direction + navigate + (maybe) delete. */
+export function RallyDetailPanel({
+  point,
+  ownLocation,
+  canDelete,
+  onDelete,
+  onClose,
+}: {
+  point: RallyPoint;
+  ownLocation: LiveLocation | null;
+  canDelete: boolean;
+  onDelete: () => void;
+  onClose: () => void;
+}) {
+  const t = useUiStore((s) => s.t);
+  const deviceHeading = useSensorStore((s) => s.heading);
+  const compassStatus = useSensorStore((s) => s.compassStatus);
+  const distance = ownLocation ? formatDistance(calculateDistance(ownLocation, point)) : null;
+  const targetBearing = ownLocation ? calculateBearing(ownLocation, point) : null;
+  const relativeDirection =
+    targetBearing !== null && deviceHeading !== null
+      ? calculateRelativeDirection(targetBearing, deviceHeading)
+      : null;
+
+  const onNavigate = () => {
+    const url = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(
+      `${point.lat},${point.lng}`,
+    )}&travelmode=walking`;
+    window.open(url, '_blank', 'noopener,noreferrer');
+  };
+
+  return (
+    <section>
+      <PanelHeader name={`📍 ${point.name}`} accent="#7c3aed" status="online" onClose={onClose} />
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 8, marginTop: 12 }}>
+        <Metric
+          label={t('distance')}
+          value={distance ? `${distance.value} ${t(distance.unit)}` : t('unknown')}
+        />
+      </div>
+      <DirectionPointer
+        available={relativeDirection !== null}
+        rotation={relativeDirection ?? 0}
+        bearing={targetBearing}
+        compassStatus={compassStatus}
+      />
+      <button
+        type="button"
+        onClick={onNavigate}
+        style={{
+          width: '100%',
+          height: 44,
+          marginTop: 12,
+          borderRadius: 14,
+          border: 'none',
+          cursor: 'pointer',
+          background: '#7c3aed',
+          color: '#fff',
+          fontFamily: 'inherit',
+          fontSize: 14,
+          fontWeight: 700,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 8,
+        }}
+      >
+        <Icon name="nav" size={17} />
+        {t('navigate')}
+      </button>
+      {canDelete && (
+        <button
+          type="button"
+          onClick={onDelete}
+          style={{
+            width: '100%',
+            height: 42,
+            marginTop: 10,
+            borderRadius: 14,
+            border: `1.5px solid ${withAlpha(tokens.danger, 0.4)}`,
+            cursor: 'pointer',
+            background: withAlpha(tokens.danger, 0.08),
+            color: tokens.danger,
+            fontFamily: 'inherit',
+            fontSize: 13.5,
+            fontWeight: 700,
+          }}
+        >
+          {t('deleteRally')}
         </button>
       )}
     </section>

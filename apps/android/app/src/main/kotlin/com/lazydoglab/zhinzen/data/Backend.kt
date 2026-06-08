@@ -95,6 +95,25 @@ object Backend {
         database.getReference("tracks/$roomId/${identity.deviceId}/$pointId").setValue(point).await()
     }
 
+    /** Create a rally point (direct RTDB write). */
+    suspend fun createRally(roomId: String, name: String, lat: Double, lng: Double, createdBy: String) {
+        val ref = database.getReference("rallyPoints/$roomId").push()
+        ref.setValue(
+            hashMapOf(
+                "name" to name,
+                "lat" to lat,
+                "lng" to lng,
+                "createdByDeviceId" to createdBy,
+                "createdAt" to System.currentTimeMillis(),
+            ),
+        ).await()
+    }
+
+    /** Delete a rally point (creator/owner gated in UI). */
+    suspend fun deleteRally(roomId: String, id: String) {
+        database.getReference("rallyPoints/$roomId/$id").removeValue().await()
+    }
+
     /** Recent track points for a member since [sinceMs], ordered oldest→newest. */
     suspend fun fetchTrack(roomId: String, deviceId: String, sinceMs: Long): List<TrackPoint> {
         val snapshot =

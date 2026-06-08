@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { LiveLocation, TrackPoint } from '@zhinzen/shared-types';
+import type { LiveLocation, RallyPoint, TrackPoint } from '@zhinzen/shared-types';
 import { buildTrackSegments } from '@zhinzen/geo-utils';
 import { color as tokens, font, withAlpha } from '@zhinzen/shared-ui';
 
@@ -26,7 +26,11 @@ interface GoogleMapViewProps {
   deviceHeading: number | null;
   selectedDeviceId: string | null;
   trackPoints: TrackPoint[];
+  rallyPoints: RallyPoint[];
   onSelectMember: (deviceId: string) => void;
+  onSelectRally: (id: string) => void;
+  /** Long-press (or right-click) on the map to drop a rally point here. */
+  onLongPress: (lat: number, lng: number) => void;
   /** Fired when the user drags the map, so the parent can drop follow mode. */
   onUserPan: () => void;
   /** Reports the map's current heading (degrees) so the parent can draw the compass. */
@@ -72,7 +76,10 @@ export function GoogleMapView({
   deviceHeading,
   selectedDeviceId,
   trackPoints,
+  rallyPoints,
   onSelectMember,
+  onSelectRally,
+  onLongPress,
   onUserPan,
   onHeadingChange,
 }: GoogleMapViewProps) {
@@ -80,8 +87,13 @@ export function GoogleMapView({
   const mapEl = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<google.maps.Map | null>(null);
   const markersRef = useRef<Map<string, google.maps.Marker>>(new Map());
+  const rallyMarkersRef = useRef<Map<string, google.maps.Marker>>(new Map());
   const trackSegmentsRef = useRef<google.maps.Polyline[]>([]);
   const onUserPanRef = useRef(onUserPan);
+  const onLongPressRef = useRef(onLongPress);
+  const onSelectRallyRef = useRef(onSelectRally);
+  onLongPressRef.current = onLongPress;
+  onSelectRallyRef.current = onSelectRally;
   onUserPanRef.current = onUserPan;
   const onHeadingChangeRef = useRef(onHeadingChange);
   onHeadingChangeRef.current = onHeadingChange;
@@ -135,6 +147,10 @@ export function GoogleMapView({
         // not), so this cleanly drops follow mode when the user moves the map.
         map.addListener('dragstart', () => onUserPanRef.current());
         map.addListener('heading_changed', () => onHeadingChangeRef.current(map.getHeading() ?? 0));
+        // Long-press (touch) / right-click (desktop) drops a rally point.
+        map.addListener('contextmenu', (e: google.maps.MapMouseEvent) => {
+          if (e.latLng) onLongPressRef.current(e.latLng.lat(), e.latLng.lng());
+        });
         mapRef.current = map;
         setLoadState('ready');
       })
@@ -146,6 +162,8 @@ export function GoogleMapView({
       cancelled = true;
       clearMarkers(markersRef.current);
       markersRef.current.clear();
+      clearMarkers(rallyMarkersRef.current);
+      rallyMarkersRef.current.clear();
       clearTrackSegments(trackSegmentsRef.current);
       trackSegmentsRef.current = [];
       mapRef.current = null;
@@ -158,6 +176,12 @@ export function GoogleMapView({
 
     syncMarkers(map, markersRef.current, pins, selectedDeviceId, onSelectMember);
   }, [onSelectMember, pins, selectedDeviceId]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    syncRallyMarkers(map, rallyMarkersRef.current, rallyPoints, (id) => onSelectRallyRef.current(id));
+  }, [rallyPoints]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -364,6 +388,40 @@ function fitToPins(
 
 function clearMarkers(markers: Map<string, google.maps.Marker>): void {
   for (const marker of markers.values()) marker.setMap(null);
+}
+
+function syncRallyMarkers(
+  map: google.maps.Map,
+  markers: Map<string, google.maps.Marker>,
+  points: RallyPoint[],
+  onSelect: (id: string) => void,
+): void {
+  const ids = new Set(points.map((p) => p.id));
+  for (const [id, marker] of markers) {
+    if (!ids.has(id)) {
+      marker.setMap(null);
+      markers.delete(id);
+    }
+  }
+  for (const point of points) {
+    let marker = markers.get(point.id);
+    const icon: google.maps.Symbol = {
+      path: 'M 0,-12 4,-4 12,-3 6,3 8,11 0,7 -8,11 -6,3 -12,-3 -4,-4 z', // star
+      fillColor: '#7c3aed',
+      fillOpacity: 1,
+      strokeColor: '#fff',
+      strokeWeight: 2,
+      scale: 1.1,
+      anchor: new google.maps.Point(0, 0),
+    };
+    if (!marker) {
+      marker = new google.maps.Marker({ map, icon, zIndex: 8 });
+      marker.addListener('click', () => onSelect(point.id));
+      markers.set(point.id, marker);
+    }
+    marker.setPosition({ lat: point.lat, lng: point.lng });
+    marker.setTitle(point.name);
+  }
 }
 
 function syncTrackSegments(
