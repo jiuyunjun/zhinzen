@@ -755,7 +755,8 @@ liveLocations/{roomId}/{deviceId}
 
 #### tracks
 
-轨迹 MVP 放在 Firestore。
+**结论（已实现）**：轨迹存 **Firestore**（实时位置走 RTDB；轨迹需要"按时间区间查询 + 过期删除"，
+更适合 Firestore）。客户端不直接写，统一经 Cloud Function **`appendTrackPoint`** 校验后写入。
 
 路径：
 
@@ -763,7 +764,7 @@ liveLocations/{roomId}/{deviceId}
 rooms/{roomId}/tracks/{deviceId}/points/{pointId}
 ```
 
-字段：
+字段（即 `appendTrackPoint` 实际写入）：
 
 ```json
 {
@@ -772,15 +773,19 @@ rooms/{roomId}/tracks/{deviceId}/points/{pointId}
   "accuracy": 10,
   "heading": 90,
   "speed": 1.2,
-  "createdAt": "timestamp",
+  "createdAt": 1710000000000,
+  "expiresAt": 1710086400000,
   "segmentKind": "stopped | slow | moving | fast"
 }
 ```
 
-轨迹点 ID 建议：
+`segmentKind` 由后端按 `speed` 归档；客户端渲染时另按 km/h 做渐变并合并同色段（见 §5.4）。
+注：Android 客户端模型只反序列化 `lat/lng/speed/createdAt` 子集。
+
+轨迹点 ID：
 
 ```text
-时间戳 + 随机后缀
+{createdAt}_{6位hex}   // 时间戳 + 随机后缀，天然按时间有序
 ```
 
 轨迹读取策略：
@@ -801,8 +806,8 @@ orderBy createdAt asc
 2. 前端通过 Cloud Functions 写入自己的轨迹点。
 3. Cloud Functions 校验 `roomId + deviceId + deviceSecret`。
 4. 设备只能写自己的 `rooms/{roomId}/tracks/{deviceId}/points/{pointId}`。
-5. 默认轨迹保留 24 小时。
-6. 超过 24 小时的轨迹点通过 Firestore TTL 或定时清理函数删除。
+5. 默认轨迹保留 24 小时（写入时即算好 `expiresAt = min(房间过期, createdAt + 保留时长)`）。
+6. 过期清理：用 Firestore TTL 策略作用于 `expiresAt` 字段（或定时清理函数）。
 
 ---
 
