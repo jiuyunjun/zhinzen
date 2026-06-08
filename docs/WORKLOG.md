@@ -5,6 +5,30 @@
 
 ---
 
+## 2026-06-05 — 轨迹改存 RTDB（方案 A）+ 定时清理 + 修 UWB 规则 ✅（已部署）
+
+**动机**：轨迹是高频 append，Firestore 按写计费贵（开车每点 3 写、~2.5s 一次）。RTDB 不按操作
+计费 → 迁过去；顺手修两个 bug。
+
+- **RTDB 规则**（`database.rules.json`，经 REST 部署到 `zhinzen-live`）：新增 `tracks/{roomId}/
+  {deviceId}/{pointId}`（追加 `!data.exists()`、字段校验、`deviceId===$deviceId`）；新增
+  `rooms/{roomId}/uwb` 可读写（**修复**之前 UWB OOB 信令被 `$other` 拒写的 bug）。
+- **客户端直写**：web `trackApi`、android `Backend.appendTrackPoint` 改为直接写 RTDB
+  `tracks/...`；`pointId={createdAt}_{rand}`；读取用 `orderByKey().startAt("{since}_")`。
+- **清理**：新增定时函数 **`pruneExpiredRooms`**（每 60 分钟）删过期房间的 RTDB
+  `liveLocations`/`tracks`/`rooms`(uwb) 并标 expired（也修了 liveLocations 一直没清理的旧问题）。
+  RTDB admin 用 `getDatabaseWithUrl(RTDB_URL, app)`。
+- 旧 `appendTrackPoint`（写 Firestore）标 `@deprecated`，暂留兼容旧客户端。
+- **安全取舍**：轨迹直写与 liveLocations 同等（仅校验格式，无 deviceSecret）。
+
+**部署**：functions（含新 `pruneExpiredRooms`）+ hosting ✅；RTDB 规则经 REST PUT 到命名实例并
+验证 tracks+uwb 已生效（`firebase deploy --only database` 对"无默认实例"项目会报错，故走 REST）。
+android `assembleDebug` ✅。文档 design.md §6.1/§6.2 已改。
+
+**坑**：JSDoc 里写 `apps/*/trackApi` 的 `*/` 会提前关闭注释（已改措辞）。
+
+---
+
 ## 2026-06-05 — 文档持久化：把近期设计变更并入 design.md（规范）
 
 把散在 WORKLOG 的近期决策固化进 `design.md`(canonical 规范)：

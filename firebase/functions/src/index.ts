@@ -2,8 +2,10 @@ import { randomBytes, createHash } from 'node:crypto';
 
 import { setGlobalOptions } from 'firebase-functions/v2';
 import { initializeApp } from 'firebase-admin/app';
+import { getDatabaseWithUrl } from 'firebase-admin/database';
 import { getFirestore } from 'firebase-admin/firestore';
 import { HttpsError, onCall, onRequest } from 'firebase-functions/v2/https';
+import { onSchedule } from 'firebase-functions/v2/scheduler';
 
 // Run in the same region as Firestore (asia-northeast1) so room transactions are
 // local, and close to the (currently Asia-based) users — avoids the US↔Tokyo and
@@ -11,9 +13,12 @@ import { HttpsError, onCall, onRequest } from 'firebase-functions/v2/https';
 // getFunctions(app, 'asia-northeast1') in sync (apps/web/src/lib/firebase.ts).
 setGlobalOptions({ region: 'asia-northeast1' });
 
-initializeApp();
+const app = initializeApp();
 
 const db = getFirestore();
+
+// Named RTDB instance (live locations + tracks). Keep in sync with the clients.
+const RTDB_URL = 'https://zhinzen-live.asia-southeast1.firebasedatabase.app';
 
 const ROOM_ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
 const ROOM_CODE_LENGTH = 10;
@@ -387,6 +392,38 @@ export const joinRoom = onCall(async (request): Promise<RoomResponse> => {
   });
 });
 
+/**
+ * Hourly cleanup: for rooms past their expiry, remove the RTDB live locations,
+ * tracks, and UWB signaling, and mark the room expired. RTDB has no native TTL,
+ * and rooms expire within 24h, so per-room deletion gives ~24h track retention.
+ */
+export const pruneExpiredRooms = onSchedule('every 60 minutes', async () => {
+  const now = Date.now();
+  const snapshot = await db
+    .collection('rooms')
+    .where('status', '==', 'active')
+    .where('expiresAt', '<=', now)
+    .limit(300)
+    .get();
+  if (snapshot.empty) return;
+
+  const rtdb = getDatabaseWithUrl(RTDB_URL, app);
+  for (const doc of snapshot.docs) {
+    const roomId = doc.id;
+    await Promise.all([
+      rtdb.ref(`liveLocations/${roomId}`).remove(),
+      rtdb.ref(`tracks/${roomId}`).remove(),
+      rtdb.ref(`rooms/${roomId}`).remove(),
+    ]);
+    await doc.ref.update({ status: 'expired' });
+  }
+});
+
+/**
+ * @deprecated Track points are now written directly to RTDB by the clients
+ * (see each app's trackApi). Kept temporarily so older deployed clients keep
+ * working; remove once all clients are updated.
+ */
 export const appendTrackPoint = onCall(
   async (request): Promise<AppendTrackPointResponse> => {
     const payload = normalizeAppendTrackPointRequest(request.data);

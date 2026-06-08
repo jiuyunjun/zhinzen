@@ -662,12 +662,12 @@ Cloud Storage
 
 ```text
 Firebase Hosting：部署 Web
-Firestore：保存房间、成员、轨迹摘要、配置
-Realtime Database：保存在线状态和实时位置
-Cloud Functions：创建房间、清理过期数据、校验写入
+Firestore：保存房间、成员、配置
+Realtime Database：在线状态、实时位置、轨迹点、UWB 信令（高频/低延迟，按流量计费）
+Cloud Functions：创建/加入房间、校验写入、pruneExpiredRooms 定时清理
 App Check：降低非法客户端调用风险
 Google Maps Platform：地图显示和导航
-Cloud Scheduler：定时清理过期房间和轨迹
+Cloud Scheduler：触发 pruneExpiredRooms（每 60 分钟）清理过期房间的 RTDB 数据
 ```
 
 ---
@@ -753,61 +753,58 @@ liveLocations/{roomId}/{deviceId}
 
 ---
 
-#### tracks
+#### tracks（存 RTDB）
 
-**结论（已实现）**：轨迹存 **Firestore**（实时位置走 RTDB；轨迹需要"按时间区间查询 + 过期删除"，
-更适合 Firestore）。客户端不直接写，统一经 Cloud Function **`appendTrackPoint`** 校验后写入。
+**结论（已实现）**：轨迹存 **RTDB**（与实时位置同一 `zhinzen-live` 实例）。原先放 Firestore，
+但轨迹是高频 append，Firestore 按写计费会很贵（开车场景每点 ≈3 次写、每 ~2.5s 一次）；
+**RTDB 不按操作计费**，更适合。客户端**直接写**（像 liveLocations，安全规则同等校验字段格式）。
 
 路径：
 
 ```text
-rooms/{roomId}/tracks/{deviceId}/points/{pointId}
+tracks/{roomId}/{deviceId}/{pointId}
 ```
 
-字段（即 `appendTrackPoint` 实际写入）：
+字段：
 
 ```json
 {
+  "deviceId": "...",
   "lat": 35.0,
   "lng": 139.0,
   "accuracy": 10,
   "heading": 90,
   "speed": 1.2,
-  "createdAt": 1710000000000,
-  "expiresAt": 1710086400000,
-  "segmentKind": "stopped | slow | moving | fast"
+  "createdAt": 1710000000000
 }
 ```
 
-`segmentKind` 由后端按 `speed` 归档；客户端渲染时另按 km/h 做渐变并合并同色段（见 §5.4）。
-注：Android 客户端模型只反序列化 `lat/lng/speed/createdAt` 子集。
+客户端渲染时按 km/h 做渐变并合并同色段（见 §5.4）。Android 客户端模型只反序列化
+`lat/lng/speed/createdAt` 子集。
 
-轨迹点 ID：
+轨迹点 ID（让 `orderByKey` 天然按时间有序）：
 
 ```text
-{createdAt}_{6位hex}   // 时间戳 + 随机后缀，天然按时间有序
+{createdAt}_{随机后缀}   // createdAt 为 13 位 epoch ms，字典序=时间序
 ```
 
 轨迹读取策略：
 
-1. 实时地图位置仍然只监听 RTDB `liveLocations/{roomId}/{deviceId}`。
+1. 实时地图位置仍然只监听 `liveLocations/{roomId}/{deviceId}`。
 2. 轨迹不全房间实时监听。
-3. 点击某个成员后，再按需读取该成员轨迹：
-
-```text
-rooms/{roomId}/tracks/{targetDeviceId}/points
-where createdAt >= now - 24h
-orderBy createdAt asc
-```
+3. 点击某成员（或默认看自己）后按需读取：`tracks/{roomId}/{deviceId}` 用
+   `orderByKey().startAt("{now-24h}_")`，结果已按时间有序。
 
 轨迹写入策略：
 
-1. 前端不直接写 Firestore 轨迹集合。
-2. 前端通过 Cloud Functions 写入自己的轨迹点。
-3. Cloud Functions 校验 `roomId + deviceId + deviceSecret`。
-4. 设备只能写自己的 `rooms/{roomId}/tracks/{deviceId}/points/{pointId}`。
-5. 默认轨迹保留 24 小时（写入时即算好 `expiresAt = min(房间过期, createdAt + 保留时长)`）。
-6. 过期清理：用 Firestore TTL 策略作用于 `expiresAt` 字段（或定时清理函数）。
+1. 前端**直接写** RTDB `tracks/{roomId}/{deviceId}/{pointId}`（追加；规则 `!data.exists()` 防改写）。
+2. 自适应采样控制频率（移动≥12m / 20s 心跳 / 最短 2.5s，见 §5.4）。
+3. 安全规则校验字段格式 + `deviceId === $deviceId`；与 liveLocations 同等（无 deviceSecret 校验，
+   见 §11.1 取舍）。需强校验可改回"经轻函数写"。
+4. **过期清理**：RTDB 无原生 TTL，用定时函数 **`pruneExpiredRooms`**（每 60 分钟）删除已过期房间的
+   `liveLocations/{roomId}`、`tracks/{roomId}`、`rooms/{roomId}`(uwb 信令) 并标记房间 expired。
+   房间 24h 过期 ⇒ 轨迹最长保留 ~24h。
+5. 旧的 Cloud Function `appendTrackPoint`（写 Firestore）已 **@deprecated**，仅为兼容旧客户端暂留。
 
 ---
 

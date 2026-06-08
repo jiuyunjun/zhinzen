@@ -19,6 +19,33 @@
         }
       }
     },
+    "tracks": {
+      "$roomId": {
+        ".read": true,
+        "$deviceId": {
+          "$pointId": {
+            ".write": "!data.exists() && newData.exists()",
+            ".validate": "newData.hasChildren(['deviceId', 'lat', 'lng', 'createdAt'])",
+            "deviceId": { ".validate": "newData.val() === $deviceId" },
+            "lat": { ".validate": "newData.isNumber() && newData.val() >= -90 && newData.val() <= 90" },
+            "lng": { ".validate": "newData.isNumber() && newData.val() >= -180 && newData.val() <= 180" },
+            "accuracy": { ".validate": "newData.isNumber() && newData.val() >= 0" },
+            "heading": { ".validate": "newData.isNumber() || newData.val() === null" },
+            "speed": { ".validate": "newData.isNumber()" },
+            "createdAt": { ".validate": "newData.isNumber()" },
+            "$other": { ".validate": false }
+          }
+        }
+      }
+    },
+    "rooms": {
+      "$roomId": {
+        "uwb": {
+          ".read": true,
+          ".write": true
+        }
+      }
+    },
     "$other": {
       ".read": false,
       ".write": false

@@ -62,35 +62,37 @@ object Backend {
         return roomIdFrom(result.getData())
     }
 
-    /** Append a verified track point for this device. */
+    /**
+     * Append a track point straight to RTDB (no per-write cost; suits the
+     * high-frequency append). Point id `{createdAt}_{rand}` so orderByKey is
+     * chronological. Cleaned up per room on expiry (functions pruneExpiredRooms).
+     */
     suspend fun appendTrackPoint(identity: DeviceIdentity, roomId: String, loc: LiveLocation) {
-        val data =
-            hashMapOf(
-                "roomId" to roomId,
+        val createdAt = loc.updatedAt
+        val pointId = "${createdAt}_${java.util.UUID.randomUUID().toString().take(6)}"
+        val point =
+            hashMapOf<String, Any?>(
                 "deviceId" to identity.deviceId,
-                "deviceSecret" to identity.deviceSecret,
                 "lat" to loc.lat,
                 "lng" to loc.lng,
                 "accuracy" to loc.accuracy,
                 "heading" to loc.heading,
                 "speed" to loc.speed,
-                "createdAt" to loc.updatedAt,
+                "createdAt" to createdAt,
             )
-        functions.getHttpsCallable("appendTrackPoint").call(data).await()
+        database.getReference("tracks/$roomId/${identity.deviceId}/$pointId").setValue(point).await()
     }
 
     /** Recent track points for a member since [sinceMs], ordered oldest→newest. */
     suspend fun fetchTrack(roomId: String, deviceId: String, sinceMs: Long): List<TrackPoint> {
         val snapshot =
-            firestore
-                .collection("rooms").document(roomId)
-                .collection("tracks").document(deviceId)
-                .collection("points")
-                .whereGreaterThan("createdAt", sinceMs)
-                .orderBy("createdAt")
+            database.getReference("tracks/$roomId/$deviceId")
+                .orderByKey()
+                .startAt("${sinceMs}_")
                 .get()
                 .await()
-        return snapshot.documents.mapNotNull { it.toObject(TrackPoint::class.java) }
+        // orderByKey yields chronological order (createdAt-prefixed keys).
+        return snapshot.children.mapNotNull { it.getValue(TrackPoint::class.java) }
     }
 
     private fun roomIdFrom(data: Any?): String {
