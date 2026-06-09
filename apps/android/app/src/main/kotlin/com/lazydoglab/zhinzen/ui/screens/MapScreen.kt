@@ -114,6 +114,8 @@ fun MapScreen(
     nearbyUwb: UwbResult?,
     nearbyScanning: Boolean,
     isOwner: Boolean,
+    isFamilyRoom: Boolean,
+    onToggleFamily: () -> Unit,
     rallyPoints: List<RallyPoint>,
     selectedRallyId: String?,
     pendingRally: Pair<Double, Double>?,
@@ -339,32 +341,51 @@ fun MapScreen(
             }
         }
 
-        // top: room code + member count — tap to copy the invite link
+        // top: room code (tap to copy invite) + family-room star
         Row(
             modifier = Modifier
                 .align(Alignment.TopStart)
                 .statusBarsPadding()
-                .padding(12.dp)
-                .clip(RoundedCornerShape(15.dp))
-                .background(Color(0xE6FFFFFF))
-                .clickable { copyInvite() }
-                .padding(horizontal = 14.dp, vertical = 12.dp),
+                .padding(12.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text(
-                text = stringResource(R.string.room_code) + "  " +
-                    (roomId?.let { RoomCode.format(it) } ?: "—") + "   ·   ${members.size}",
-                color = ZzColor.Ink,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.SemiBold,
-            )
-            Text(
-                text = stringResource(R.string.copy_invite),
-                color = ZzColor.Self,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Bold,
-            )
+            Row(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(15.dp))
+                    .background(Color(0xE6FFFFFF))
+                    .clickable { copyInvite() }
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text(
+                    text = stringResource(R.string.room_code) + "  " +
+                        (roomId?.let { RoomCode.format(it) } ?: "—") + "   ·   ${members.size}",
+                    color = ZzColor.Ink,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    text = stringResource(R.string.copy_invite),
+                    color = ZzColor.Self,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(15.dp))
+                    .background(if (isFamilyRoom) Color(0xFFF59E0B) else Color(0xE6FFFFFF))
+                    .clickable { onToggleFamily() }
+                    .padding(13.dp),
+            ) {
+                Text(
+                    text = if (isFamilyRoom) "★" else "☆",
+                    color = if (isFamilyRoom) Color.White else ZzColor.InkFaint,
+                    fontSize = 18.sp,
+                )
+            }
         }
 
         if (!granted) {

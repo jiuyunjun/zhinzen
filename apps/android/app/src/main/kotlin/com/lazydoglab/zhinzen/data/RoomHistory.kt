@@ -56,6 +56,15 @@ class RoomHistory(context: Context) {
         return next
     }
 
+    /** The pinned "family room" auto-entered on launch (device-local), or null. */
+    fun familyRoom(): String? = prefs.getString(FAMILY_KEY, null)?.takeIf { it.isNotEmpty() }
+
+    fun setFamilyRoom(roomId: String?) {
+        prefs.edit().apply {
+            if (roomId.isNullOrEmpty()) remove(FAMILY_KEY) else putString(FAMILY_KEY, roomId)
+        }.apply()
+    }
+
     fun remove(roomId: String): List<RoomHistoryEntry> {
         val next = list().filter { it.roomId != roomId }
         save(next)
@@ -80,6 +89,7 @@ class RoomHistory(context: Context) {
     private companion object {
         const val PREFS = "zhinzen.roomHistory.v1"
         const val KEY = "entries"
+        const val FAMILY_KEY = "familyRoom"
         const val MAX_ENTRIES = 10
     }
 }

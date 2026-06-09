@@ -26,6 +26,8 @@
     <string name="new_rally">新建集结点</string>
     <string name="rally_default_name">集结点</string>
     <string name="rally_name_label">集结点名称</string>
+    <string name="family_room_set">已设为家人房间，下次打开自动进入</string>
+    <string name="family_room_unset">已取消家人房间</string>
     <string name="delete_rally">删除集结点</string>
     <string name="create">创建</string>
     <string name="leave_room">离开房间</string>

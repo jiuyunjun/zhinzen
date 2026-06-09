@@ -86,6 +86,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     var createdByDeviceId by mutableStateOf<String?>(null)
         private set
     val isOwner: Boolean get() = createdByDeviceId != null && createdByDeviceId == deviceId
+    /** The pinned family room (auto-entered on launch), or null. */
+    var familyRoomId by mutableStateOf(roomHistoryStore.familyRoom())
+        private set
+    val isFamilyRoom: Boolean get() = roomId != null && roomId == familyRoomId
     /** Shared rally points in this room. */
     var rallyPoints by mutableStateOf<List<RallyPoint>>(emptyList())
         private set
@@ -229,6 +233,20 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private fun stopUwb() {
         uwbController.stop()
         nearbyUwb = null
+    }
+
+    /** Set/unset the current room as the family room (auto-entered next launch). */
+    fun toggleFamilyRoom() {
+        val rid = roomId ?: return
+        val next = if (familyRoomId == rid) null else rid
+        roomHistoryStore.setFamilyRoom(next)
+        familyRoomId = next
+        haptics.tap()
+        Toast.makeText(
+            getApplication(),
+            getApplication<Application>().getString(if (next != null) R.string.family_room_set else R.string.family_room_unset),
+            Toast.LENGTH_SHORT,
+        ).show()
     }
 
     // --- Rally points ---
@@ -580,6 +598,18 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun stopLocation() {
         LocationSharingService.stop(getApplication())
+    }
+
+    init {
+        // Auto-enter the family room on launch (deferred so a deep-link invite, set
+        // synchronously in MainActivity.onCreate, takes priority).
+        if (displayName.isNotBlank() && familyRoomId != null) {
+            viewModelScope.launch {
+                if (!busy && roomId == null && pendingInvite == null) {
+                    joinRoom(familyRoomId!!)
+                }
+            }
+        }
     }
 
     override fun onCleared() {

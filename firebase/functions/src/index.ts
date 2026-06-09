@@ -23,6 +23,9 @@ const RTDB_URL = 'https://zhinzen-live.asia-southeast1.firebasedatabase.app';
 const ROOM_ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
 const ROOM_CODE_LENGTH = 10;
 const DEFAULT_ROOM_TTL_MS = 24 * 60 * 60 * 1000;
+// Sliding expiry: each join pushes the room's expiry this far out, so a room used
+// regularly (e.g. a family room reopened daily) never expires; abandoned rooms die.
+const SLIDING_ROOM_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const DEFAULT_MAX_MEMBERS = 20;
 const DEFAULT_TRACK_RETENTION_MINUTES = 24 * 60;
 const MAX_TRACK_POINT_CLOCK_SKEW_MS = 5 * 60 * 1000;
@@ -352,6 +355,9 @@ export const joinRoom = onCall(async (request): Promise<RoomResponse> => {
       throw new HttpsError('failed-precondition', 'Room has expired.');
     }
 
+    // Slide the expiry forward so actively-used rooms persist.
+    const slidExpiresAt = Math.max(room.expiresAt, now + SLIDING_ROOM_TTL_MS);
+
     const maxMembers =
       typeof room.maxMembers === 'number' ? room.maxMembers : DEFAULT_MAX_MEMBERS;
 
@@ -383,9 +389,11 @@ export const joinRoom = onCall(async (request): Promise<RoomResponse> => {
       { merge: true },
     );
 
+    transaction.update(roomRef, { expiresAt: slidExpiresAt });
+
     return {
       roomId: payload.roomId,
-      expiresAt: room.expiresAt,
+      expiresAt: slidExpiresAt,
       maxMembers,
       trackRetentionMinutes:
         typeof room.trackRetentionMinutes === 'number'

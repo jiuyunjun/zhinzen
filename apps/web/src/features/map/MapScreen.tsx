@@ -14,6 +14,7 @@ import { isMapRotatable } from '../../lib/env';
 import { haptics } from '../../lib/haptics';
 import { formatRoomCode, inviteLink } from '../../lib/roomCode';
 import { updateRoomMembers } from '../../lib/roomHistory';
+import { getFamilyRoom, setFamilyRoom } from '../../lib/familyRoom';
 import { fetchRecentTrackPoints } from '../../lib/trackApi';
 import { createRallyPoint, deleteRallyPoint, watchRallyPoints } from '../../lib/rallyApi';
 import { GoogleMapView } from './GoogleMapView';
@@ -58,6 +59,16 @@ export function MapScreen({ onLeave }: { onLeave: () => void }) {
   const [rallyPoints, setRallyPoints] = useState<RallyPoint[]>([]);
   const [selectedRallyId, setSelectedRallyId] = useState<string | null>(null);
   const [pendingRally, setPendingRally] = useState<{ lat: number; lng: number } | null>(null);
+  const [isFamily, setIsFamily] = useState(() => roomId !== null && getFamilyRoom() === roomId);
+
+  const onToggleFamily = () => {
+    if (!roomId) return;
+    const next = getFamilyRoom() === roomId ? null : roomId;
+    setFamilyRoom(next);
+    setIsFamily(next !== null);
+    haptics.tap();
+    flash(next ? t('familyRoomSet') : t('familyRoomUnset'));
+  };
   // Continuous (unwrapped) map heading so the compass needle takes the short way
   // across north instead of spinning ~360° when getHeading() wraps 359°→0°.
   const headingAccum = useRef({ prevRaw: 0, continuous: 0 });
@@ -410,6 +421,28 @@ export function MapScreen({ onLeave }: { onLeave: () => void }) {
         >
           <Icon name="copy" size={17} />
           {t('invite')}
+        </button>
+        <button
+          type="button"
+          onClick={onToggleFamily}
+          title={t('familyRoom')}
+          aria-label={t('familyRoom')}
+          style={{
+            height: 46,
+            width: 46,
+            borderRadius: 15,
+            border: 'none',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: isFamily ? '#f59e0b' : '#fff',
+            color: isFamily ? '#fff' : tokens.inkFaint,
+            fontSize: 20,
+            boxShadow: '0 4px 14px rgba(0,0,0,0.12)',
+          }}
+        >
+          {isFamily ? '★' : '☆'}
         </button>
         <div style={{ alignSelf: 'center' }}>
           <LangToggle />
