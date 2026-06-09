@@ -15,6 +15,7 @@ import com.google.firebase.database.DatabaseReference
 import com.google.firebase.database.ValueEventListener
 import com.google.firebase.firestore.ListenerRegistration
 import com.lazydoglab.zhinzen.data.Backend
+import com.lazydoglab.zhinzen.data.Geo
 import com.lazydoglab.zhinzen.data.LiveLocation
 import com.lazydoglab.zhinzen.data.MemberStatus
 import com.lazydoglab.zhinzen.data.MemberView
@@ -37,10 +38,17 @@ import com.lazydoglab.zhinzen.sensor.CompassController
 import com.lazydoglab.zhinzen.service.LocationSharingService
 import com.lazydoglab.zhinzen.util.DeviceCapabilities
 import com.lazydoglab.zhinzen.util.Haptics
+import com.lazydoglab.zhinzen.util.Notifier
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 enum class Phase { Onboarding, Room, Map }
+
+// Arrival geofence radii (meters, with hysteresis to avoid flapping) + battery alert.
+private const val GEOFENCE_ENTER_M = 120.0
+private const val GEOFENCE_EXIT_M = 180.0
+private const val LOW_BATTERY_PCT = 15
+private const val BATTERY_RESET_PCT = 25
 
 /**
  * App state + backend orchestration. Mirrors the web's device/room/members/
@@ -63,6 +71,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private var pendingInvite: String? = null
     private var prevMemberIds: Set<String>? = null
     private var seenSelf = false
+    // Per (deviceId|rallyId) inside/outside state for arrival alerts; low-battery dedupe.
+    private val geofenceInside = HashMap<String, Boolean>()
+    private val lowBatteryFired = HashSet<String>()
 
     val deviceId: String = identity.deviceId
 
@@ -233,6 +244,42 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private fun stopUwb() {
         uwbController.stop()
         nearbyUwb = null
+    }
+
+    /** Arrival/departure (geofence on rally points) + low-battery alerts. */
+    private fun evaluateAlerts(views: List<MemberView>) {
+        val app = getApplication<Application>()
+        views.filter { !it.isSelf }.forEach { mv ->
+            val loc = mv.location
+            val name = mv.member.displayName.ifBlank { "?" }
+            if (loc != null) {
+                rallyPoints.forEach { rp ->
+                    val key = "${mv.member.deviceId}|${rp.id}"
+                    val d = Geo.distanceMeters(loc.lat, loc.lng, rp.lat, rp.lng)
+                    val prev = geofenceInside[key]
+                    val inside = if (prev == true) d < GEOFENCE_EXIT_M else d < GEOFENCE_ENTER_M
+                    if (prev != null && prev != inside) {
+                        val msg = app.getString(if (inside) R.string.alert_arrived else R.string.alert_left, name, rp.name)
+                        fireAlert(msg)
+                    }
+                    geofenceInside[key] = inside
+                }
+            }
+            val battery = loc?.battery
+            if (battery != null) {
+                if (battery < LOW_BATTERY_PCT && mv.member.deviceId !in lowBatteryFired) {
+                    lowBatteryFired.add(mv.member.deviceId)
+                    fireAlert(app.getString(R.string.alert_low_battery, name, battery))
+                } else if (battery >= BATTERY_RESET_PCT) {
+                    lowBatteryFired.remove(mv.member.deviceId)
+                }
+            }
+        }
+    }
+
+    private fun fireAlert(text: String) {
+        haptics.success()
+        Notifier.alert(getApplication(), getApplication<Application>().getString(R.string.app_name), text)
     }
 
     /** Set/unset the current room as the family room (auto-entered next launch). */
@@ -458,6 +505,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         lastHistoryMembers = emptyList()
         prevMemberIds = null
         seenSelf = false
+        geofenceInside.clear()
+        lowBatteryFired.clear()
         roomHistory = roomHistoryStore.add(id)
         phase = Phase.Map
         startWatching(id)
@@ -570,6 +619,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             leaveRoom()
             return
         }
+
+        evaluateAlerts(views)
         // Capture member names for the room-history avatar previews (only on change).
         val rid = roomId
         if (rid != null) {

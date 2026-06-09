@@ -16,6 +16,7 @@ import { formatRoomCode, inviteLink } from '../../lib/roomCode';
 import { updateRoomMembers } from '../../lib/roomHistory';
 import { getFamilyRoom, setFamilyRoom } from '../../lib/familyRoom';
 import { fetchRecentTrackPoints } from '../../lib/trackApi';
+import { calculateDistance } from '@zhinzen/geo-utils';
 import { createRallyPoint, deleteRallyPoint, watchRallyPoints } from '../../lib/rallyApi';
 import { GoogleMapView } from './GoogleMapView';
 import { MemberDetailPanel, RallyDetailPanel } from './MemberDetailPanel';
@@ -132,6 +133,38 @@ export function MapScreen({ onLeave }: { onLeave: () => void }) {
     if (!roomId) return;
     return watchRallyPoints(roomId, setRallyPoints);
   }, [roomId]);
+
+  // Arrival/departure (geofence on rally points) + low-battery alerts.
+  const geofenceInsideRef = useRef<Record<string, boolean>>({});
+  const lowBatteryRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!roomId) return;
+    for (const m of members) {
+      if (m.isSelf || !m.location) continue;
+      const name = m.member.displayName || t('you');
+      for (const rp of rallyPoints) {
+        const key = `${m.member.deviceId}|${rp.id}`;
+        const d = calculateDistance(m.location, rp);
+        const prev = geofenceInsideRef.current[key];
+        const inside = prev ? d < 180 : d < 120;
+        if (prev !== undefined && prev !== inside) {
+          flash(inside ? t('alertArrived', { name, place: rp.name }) : t('alertLeft', { name, place: rp.name }));
+          haptics.success();
+        }
+        geofenceInsideRef.current[key] = inside;
+      }
+      const b = m.location.battery;
+      if (typeof b === 'number') {
+        if (b < 15 && !lowBatteryRef.current.has(m.member.deviceId)) {
+          lowBatteryRef.current.add(m.member.deviceId);
+          flash(t('alertLowBattery', { name, pct: String(b) }));
+          haptics.success();
+        } else if (b >= 25) {
+          lowBatteryRef.current.delete(m.member.deviceId);
+        }
+      }
+    }
+  }, [members, rallyPoints, roomId, t, flash]);
 
   const selectedRally = useMemo(
     () => rallyPoints.find((p) => p.id === selectedRallyId) ?? null,
