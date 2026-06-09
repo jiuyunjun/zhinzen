@@ -471,6 +471,7 @@ export const pruneExpiredRooms = onSchedule('every 60 minutes', async () => {
       rtdb.ref(`tracks/${roomId}`).remove(),
       rtdb.ref(`rooms/${roomId}`).remove(),
       rtdb.ref(`rallyPoints/${roomId}`).remove(),
+      rtdb.ref(`pokes/${roomId}`).remove(),
     ]);
     await doc.ref.update({ status: 'expired' });
   }

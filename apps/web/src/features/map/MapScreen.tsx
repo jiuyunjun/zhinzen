@@ -18,6 +18,7 @@ import { getFamilyRoom, setFamilyRoom } from '../../lib/familyRoom';
 import { fetchRecentTrackPoints } from '../../lib/trackApi';
 import { calculateDistance } from '@zhinzen/geo-utils';
 import { createRallyPoint, deleteRallyPoint, watchRallyPoints } from '../../lib/rallyApi';
+import { sendPoke, watchPokes } from '../../lib/pokeApi';
 import { GoogleMapView } from './GoogleMapView';
 import { MemberDetailPanel, RallyDetailPanel } from './MemberDetailPanel';
 import { MemberStrip } from './MemberStrip';
@@ -194,6 +195,26 @@ export function MapScreen({ onLeave }: { onLeave: () => void }) {
   const onDeleteRally = (id: string) => {
     setSelectedRallyId(null);
     if (roomId) void deleteRallyPoint(roomId, id).then(() => haptics.tap());
+  };
+
+  // Pokes / quick messages: receive (vibrate + toast) and send.
+  useEffect(() => {
+    if (!roomId) return;
+    const startedAt = Date.now();
+    return watchPokes(roomId, (poke) => {
+      if (poke.from === deviceId || poke.createdAt < startedAt) return;
+      if (poke.to !== '' && poke.to !== deviceId) return;
+      flash(`${poke.fromName || t('you')}: ${poke.text}`);
+      haptics.success();
+    });
+  }, [roomId, deviceId, t, flash]);
+
+  const onPoke = (to: string, text: string) => {
+    if (!roomId) return;
+    haptics.tap();
+    void sendPoke(roomId, { from: deviceId, fromName: displayName, to, text }).then(() =>
+      flash(t('pokeSent')),
+    );
   };
 
   // Capture member names for the room-history avatar previews.
@@ -543,6 +564,7 @@ export function MapScreen({ onLeave }: { onLeave: () => void }) {
             ownLocation={effectiveOwnLocation}
             canKick={createdByDeviceId === deviceId && !selectedMember.isSelf}
             onKick={onKick}
+            onPoke={(text) => onPoke(selectedMember.member.deviceId, text)}
             onClose={onCloseDetail}
             onLeaveRoom={onLeave}
             onRename={onRename}

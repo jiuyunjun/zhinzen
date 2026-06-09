@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -124,6 +125,7 @@ fun MapScreen(
     onSelectMember: (String?) -> Unit,
     onRename: (String) -> Unit,
     onKick: (String) -> Unit,
+    onPoke: (String, String) -> Unit,
     onLongPress: (Double, Double) -> Unit,
     onSelectRally: (String?) -> Unit,
     onConfirmRally: (String) -> Unit,
@@ -481,6 +483,7 @@ fun MapScreen(
                     nearbyScanning = nearbyScanning,
                     canKick = isOwner && !selected.isSelf,
                     onKick = onKick,
+                    onPoke = { text -> onPoke(selected.member.deviceId, text) },
                     onClose = { onSelectMember(null) },
                     onRename = onRename,
                     onLeave = { showLeaveConfirm = true },
@@ -595,6 +598,7 @@ private fun MemberDetail(
     nearbyScanning: Boolean,
     canKick: Boolean,
     onKick: (String) -> Unit,
+    onPoke: (String) -> Unit,
     onClose: () -> Unit,
     onRename: (String) -> Unit,
     onLeave: () -> Unit,
@@ -629,7 +633,7 @@ private fun MemberDetail(
     if (member.isSelf) {
         SelfEditor(member, onRename, onLeave)
     } else {
-        OtherDetail(member, selfLocation, deviceHeading, estimate, uwb, nearbyScanning, canKick, onKick)
+        OtherDetail(member, selfLocation, deviceHeading, estimate, uwb, nearbyScanning, canKick, onKick, onPoke)
     }
 }
 
@@ -779,6 +783,7 @@ private fun OtherDetail(
     nearbyScanning: Boolean,
     canKick: Boolean,
     onKick: (String) -> Unit,
+    onPoke: (String) -> Unit,
 ) {
     val context = LocalContext.current
     val haptic = LocalHapticFeedback.current
@@ -841,6 +846,26 @@ private fun OtherDetail(
             fontSize = 12.5.sp,
             modifier = Modifier.padding(top = 8.dp),
         )
+    }
+
+    // Poke / quick messages.
+    val pokes = listOf(
+        stringResource(R.string.poke_poke),
+        stringResource(R.string.poke_arrived),
+        stringResource(R.string.poke_wait),
+        stringResource(R.string.poke_where),
+    )
+    Row(
+        modifier = Modifier
+            .horizontalScroll(rememberScrollState())
+            .padding(top = 10.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        pokes.forEach { text ->
+            OutlinedButton(onClick = { onPoke(text) }, contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp)) {
+                Text(text, fontSize = 13.sp)
+            }
+        }
     }
 
     if (location != null && member.status != MemberStatus.ONLINE) {

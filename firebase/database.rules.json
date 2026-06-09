@@ -54,6 +54,21 @@
         }
       }
     },
+    "pokes": {
+      "$roomId": {
+        ".read": true,
+        "$id": {
+          ".write": "!data.exists() && newData.exists()",
+          ".validate": "newData.hasChildren(['from', 'to', 'text', 'createdAt'])",
+          "from": { ".validate": "newData.isString()" },
+          "fromName": { ".validate": "newData.isString()" },
+          "to": { ".validate": "newData.isString()" },
+          "text": { ".validate": "newData.isString() && newData.val().length <= 80" },
+          "createdAt": { ".validate": "newData.isNumber()" },
+          "$other": { ".validate": false }
+        }
+      }
+    },
     "rooms": {
       "$roomId": {
         "uwb": {

@@ -61,6 +61,7 @@ fun ZhinzenApp(viewModel: AppViewModel = viewModel()) {
                         onSelectMember = viewModel::selectMember,
                         onRename = viewModel::renameInRoom,
                         onKick = viewModel::kickMember,
+                        onPoke = viewModel::sendPoke,
                         onLongPress = viewModel::startRally,
                         onSelectRally = viewModel::selectRally,
                         onConfirmRally = viewModel::confirmRally,

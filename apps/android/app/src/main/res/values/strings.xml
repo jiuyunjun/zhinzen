@@ -32,6 +32,10 @@
     <string name="alert_arrived">%1$s 到达 %2$s</string>
     <string name="alert_left">%1$s 离开 %2$s</string>
     <string name="alert_low_battery">%1$s 电量仅剩 %2$d%%</string>
+    <string name="poke_poke">👋 戳一戳</string>
+    <string name="poke_arrived">我到了</string>
+    <string name="poke_wait">等我5分钟</string>
+    <string name="poke_where">在哪呢</string>
     <string name="delete_rally">删除集结点</string>
     <string name="create">创建</string>
     <string name="leave_room">离开房间</string>

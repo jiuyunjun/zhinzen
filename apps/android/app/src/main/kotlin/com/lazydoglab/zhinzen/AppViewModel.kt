@@ -9,6 +9,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.google.firebase.database.ChildEventListener
 import com.google.firebase.database.DataSnapshot
 import com.google.firebase.database.DatabaseError
 import com.google.firebase.database.DatabaseReference
@@ -139,6 +140,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private var liveListener: ValueEventListener? = null
     private var rallyRef: DatabaseReference? = null
     private var rallyListener: ValueEventListener? = null
+    private var pokeRef: DatabaseReference? = null
+    private var pokeListener: ChildEventListener? = null
+    private var pokeWatchStart = 0L
     private var compassJob: Job? = null
 
     private fun currentIdentity(): DeviceIdentity = identity.copy(displayName = displayName)
@@ -244,6 +248,15 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private fun stopUwb() {
         uwbController.stop()
         nearbyUwb = null
+    }
+
+    /** Send a poke / quick message to a member. */
+    fun sendPoke(targetDeviceId: String, text: String) {
+        val rid = roomId ?: return
+        haptics.tap()
+        viewModelScope.launch {
+            runCatching { Backend.sendPoke(rid, deviceId, displayName, targetDeviceId, text) }
+        }
     }
 
     /** Arrival/departure (geofence on rally points) + low-battery alerts. */
@@ -562,6 +575,31 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         rRef.addValueEventListener(rListener)
         rallyRef = rRef
         rallyListener = rListener
+
+        pokeWatchStart = System.currentTimeMillis()
+        val pRef = Backend.database.getReference("pokes/$roomId")
+        val pListener =
+            object : ChildEventListener {
+                override fun onChildAdded(snapshot: DataSnapshot, previousChildName: String?) {
+                    val from = snapshot.child("from").getValue(String::class.java) ?: return
+                    val to = snapshot.child("to").getValue(String::class.java) ?: ""
+                    val text = snapshot.child("text").getValue(String::class.java) ?: return
+                    val createdAt = snapshot.child("createdAt").getValue(Long::class.java) ?: 0
+                    val fromName = snapshot.child("fromName").getValue(String::class.java) ?: "?"
+                    if (from == deviceId || createdAt < pokeWatchStart) return
+                    if (to.isNotEmpty() && to != deviceId) return
+                    haptics.success()
+                    Notifier.alert(getApplication(), fromName, text)
+                }
+
+                override fun onChildChanged(snapshot: DataSnapshot, previousChildName: String?) {}
+                override fun onChildRemoved(snapshot: DataSnapshot) {}
+                override fun onChildMoved(snapshot: DataSnapshot, previousChildName: String?) {}
+                override fun onCancelled(error: DatabaseError) {}
+            }
+        pRef.addChildEventListener(pListener)
+        pokeRef = pRef
+        pokeListener = pListener
     }
 
     private fun stopWatching() {
@@ -573,6 +611,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         rallyListener?.let { rallyRef?.removeEventListener(it) }
         rallyRef = null
         rallyListener = null
+        pokeListener?.let { pokeRef?.removeEventListener(it) }
+        pokeRef = null
+        pokeListener = null
         rallyPoints = emptyList()
         selectedRallyId = null
         memberDocs = emptyList()

@@ -19,6 +19,8 @@ interface MemberDetailPanelProps {
   /** Owner-only: show a kick button for this (other) member. */
   canKick?: boolean;
   onKick?: (deviceId: string) => void;
+  /** Send a poke / quick message to this member. */
+  onPoke?: (text: string) => void;
   onClose: () => void;
   onLeaveRoom?: () => void;
   /** Save a new display name for self (only used for the self panel). */
@@ -35,6 +37,7 @@ export function MemberDetailPanel({
   ownLocation,
   canKick,
   onKick,
+  onPoke,
   onClose,
   onLeaveRoom,
   onRename,
@@ -50,9 +53,15 @@ export function MemberDetailPanel({
       ownLocation={ownLocation}
       canKick={canKick}
       onKick={onKick}
+      onPoke={onPoke}
       onClose={onClose}
     />
   );
+}
+
+/** Preset quick-message texts (localized at send time). */
+function pokePresets(t: ReturnType<typeof useUiStore.getState>['t']): string[] {
+  return [t('pokePoke'), t('pokeArrived'), t('pokeWait'), t('pokeWhere')];
 }
 
 function PanelHeader({
@@ -252,12 +261,14 @@ function OtherPanel({
   ownLocation,
   canKick,
   onKick,
+  onPoke,
   onClose,
 }: {
   member: MemberView;
   ownLocation: LiveLocation | null;
   canKick?: boolean;
   onKick?: (deviceId: string) => void;
+  onPoke?: (text: string) => void;
   onClose: () => void;
 }) {
   const t = useUiStore((s) => s.t);
@@ -344,6 +355,32 @@ function OtherPanel({
         <Icon name="nav" size={17} />
         {t('navigate')}
       </button>
+
+      {onPoke && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>
+          {pokePresets(t).map((text) => (
+            <button
+              key={text}
+              type="button"
+              onClick={() => onPoke(text)}
+              style={{
+                height: 36,
+                padding: '0 12px',
+                borderRadius: 12,
+                border: `1.5px solid ${tokens.line}`,
+                background: '#fff',
+                color: tokens.ink,
+                fontFamily: 'inherit',
+                fontSize: 13,
+                fontWeight: 600,
+                cursor: 'pointer',
+              }}
+            >
+              {text}
+            </button>
+          ))}
+        </div>
+      )}
 
       {canKick && onKick && (
         <button

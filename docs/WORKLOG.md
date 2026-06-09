@@ -5,6 +5,27 @@
 
 ---
 
+## 2026-06-09 — 到达提醒 + 低电量提醒 + 戳一戳/快捷消息（web+app，已部署）✅
+
+为家人/情侣场景做的一批提醒类功能(用户选:到达提醒、戳一戳、低电量、安卓系统通知)。
+
+**1) 到达/离开提醒(集结点当地理围栏)**:对每个其他成员 × 每个集结点算距离,进 120m / 出 180m
+   (滞回防抖动)跨越时提醒「X 到达/离开 <地点>」。首次评估只建基线不提醒。
+**2) 低电量提醒**:对方电量 <15% 提醒一次,回到 ≥25% 复位。
+**3) 安卓系统通知**:新增 `util/Notifier`(高优先级渠道 `zhinzen_alerts`),到达/低电量/戳一戳都弹
+   系统通知(后台也能看到);网页用应用内 toast。都带震动。
+**4) 戳一戳/快捷消息**:RTDB `pokes/{roomId}/{id}`(直写,规则校验,prune 清理)。成员详情里
+   「👋 戳一戳 / 我到了 / 等我5分钟 / 在哪呢」一键发;对方手机震动 + 通知/toast。收端只对
+   `createdAt >= 订阅起点` 且发给自己(或广播)的 poke 触发,避免重放历史。
+
+**实现**:web `lib/pokeApi`(onChildAdded);android `Backend.sendPoke` + VM `ChildEventListener`。
+geofence/battery 评估放在客户端(VM `rebuildMembers` / web effect),后台进程存活时也会触发。
+
+**部署**:rules(pokes)+ pruneExpiredRooms 已部署;web build+deploy;android `assembleDebug` + APK。
+⚠️ 限制:杀掉 App 后(进程没了)收不到提醒;真正的离线推送要接 FCM(未做)。需真机多端实测。
+
+---
+
 ## 2026-06-09 — 家人房间：开 App 自动进入 + 滑动续期（web+app，已部署）✅
 
 无账号也能做"家人房间":你和对象各自把同一房间设为家人房间 → 开 App 直接进地图看到对方。

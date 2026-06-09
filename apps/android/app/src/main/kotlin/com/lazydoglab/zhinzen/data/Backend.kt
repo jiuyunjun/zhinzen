@@ -109,6 +109,20 @@ object Backend {
         ).await()
     }
 
+    /** Send a poke / quick message (direct RTDB write). */
+    suspend fun sendPoke(roomId: String, from: String, fromName: String, to: String, text: String) {
+        val ref = database.getReference("pokes/$roomId").push()
+        ref.setValue(
+            hashMapOf(
+                "from" to from,
+                "fromName" to fromName,
+                "to" to to,
+                "text" to text,
+                "createdAt" to System.currentTimeMillis(),
+            ),
+        ).await()
+    }
+
     /** Delete a rally point (creator/owner gated in UI). */
     suspend fun deleteRally(roomId: String, id: String) {
         database.getReference("rallyPoints/$roomId/$id").removeValue().await()
