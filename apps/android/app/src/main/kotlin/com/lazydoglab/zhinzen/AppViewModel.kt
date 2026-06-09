@@ -45,9 +45,7 @@ import kotlinx.coroutines.launch
 
 enum class Phase { Onboarding, Room, Map }
 
-// Arrival geofence radii (meters, with hysteresis to avoid flapping) + battery alert.
-private const val GEOFENCE_ENTER_M = 120.0
-private const val GEOFENCE_EXIT_M = 180.0
+// Low-battery alert thresholds (with hysteresis). Geofence radius is per rally point.
 private const val LOW_BATTERY_PCT = 15
 private const val BATTERY_RESET_PCT = 25
 
@@ -269,8 +267,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 rallyPoints.forEach { rp ->
                     val key = "${mv.member.deviceId}|${rp.id}"
                     val d = Geo.distanceMeters(loc.lat, loc.lng, rp.lat, rp.lng)
+                    val r = rp.radius.toDouble()
                     val prev = geofenceInside[key]
-                    val inside = if (prev == true) d < GEOFENCE_EXIT_M else d < GEOFENCE_ENTER_M
+                    val inside = if (prev == true) d < r * 1.5 else d < r
                     if (prev != null && prev != inside) {
                         val msg = app.getString(if (inside) R.string.alert_arrived else R.string.alert_left, name, rp.name)
                         fireAlert(msg)
@@ -321,14 +320,21 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         pendingRally = null
     }
 
-    fun confirmRally(name: String) {
+    fun confirmRally(name: String, radius: Int) {
         val at = pendingRally ?: return
         val rid = roomId ?: return
         pendingRally = null
         viewModelScope.launch {
-            runCatching { Backend.createRally(rid, name.ifBlank { "集结点" }, at.first, at.second, deviceId) }
+            runCatching { Backend.createRally(rid, name.ifBlank { "集结点" }, at.first, at.second, deviceId, radius) }
                 .onSuccess { haptics.success() }
         }
+    }
+
+    fun setRallyRadius(id: String, radius: Int) {
+        val rid = roomId ?: return
+        val rp = rallyPoints.firstOrNull { it.id == id } ?: return
+        if (rp.createdByDeviceId != deviceId && !isOwner) return
+        viewModelScope.launch { runCatching { Backend.updateRallyRadius(rid, id, radius) }.onSuccess { haptics.tap() } }
     }
 
     fun selectRally(id: String?) {

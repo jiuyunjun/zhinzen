@@ -76,6 +76,7 @@ import com.google.android.gms.maps.model.BitmapDescriptorFactory
 import com.google.android.gms.maps.model.CameraPosition
 import com.google.android.gms.maps.model.LatLng
 import com.google.android.gms.maps.model.LatLngBounds
+import com.google.maps.android.compose.Circle
 import com.google.maps.android.compose.GoogleMap
 import com.google.maps.android.compose.MapProperties
 import com.google.maps.android.compose.MapUiSettings
@@ -128,9 +129,10 @@ fun MapScreen(
     onPoke: (String, String) -> Unit,
     onLongPress: (Double, Double) -> Unit,
     onSelectRally: (String?) -> Unit,
-    onConfirmRally: (String) -> Unit,
+    onConfirmRally: (String, Int) -> Unit,
     onCancelRally: () -> Unit,
     onDeleteRally: (String) -> Unit,
+    onSetRallyRadius: (String, Int) -> Unit,
     onToggleSharing: () -> Unit,
     onToggleHeadingUp: () -> Unit,
     modifier: Modifier = Modifier,
@@ -299,6 +301,15 @@ fun MapScreen(
                             true
                         },
                     )
+                    if (selectedRally) {
+                        Circle(
+                            center = LatLng(rp.lat, rp.lng),
+                            radius = rp.radius.toDouble(),
+                            strokeColor = ZzColor.Target,
+                            strokeWidth = 4f,
+                            fillColor = ZzColor.Target.copy(alpha = 0.12f),
+                        )
+                    }
                 }
             }
             // Track: simplify by zoom + merge same-color runs into one polyline each
@@ -493,7 +504,8 @@ fun MapScreen(
                     point = selectedRally,
                     selfLocation = selfLocation,
                     deviceHeading = deviceHeading,
-                    canDelete = selectedRally.createdByDeviceId == selfId || isOwner,
+                    canEdit = selectedRally.createdByDeviceId == selfId || isOwner,
+                    onSetRadius = { r -> onSetRallyRadius(selectedRally.id, r) },
                     onDelete = { onDeleteRally(selectedRally.id) },
                     onClose = { onSelectRally(null) },
                 )
@@ -674,7 +686,8 @@ private fun RallyDetail(
     point: RallyPoint,
     selfLocation: LiveLocation?,
     deviceHeading: Float?,
-    canDelete: Boolean,
+    canEdit: Boolean,
+    onSetRadius: (Int) -> Unit,
     onDelete: () -> Unit,
     onClose: () -> Unit,
 ) {
@@ -710,6 +723,12 @@ private fun RallyDetail(
     ) {
         DirectionPointer(relative)
         Metric(label = stringResource(R.string.distance), value = distance, modifier = Modifier.weight(1f))
+        Metric(label = stringResource(R.string.rally_radius), value = "${point.radius} m", modifier = Modifier.weight(1f))
+    }
+    if (canEdit) {
+        Box(modifier = Modifier.padding(top = 8.dp)) {
+            RadiusChips(point.radius, onSetRadius)
+        }
     }
     Button(
         onClick = {
@@ -721,7 +740,7 @@ private fun RallyDetail(
     ) {
         Text(stringResource(R.string.navigate))
     }
-    if (canDelete) {
+    if (canEdit) {
         OutlinedButton(
             onClick = onDelete,
             modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
@@ -733,8 +752,9 @@ private fun RallyDetail(
 }
 
 @Composable
-private fun RallyNameDialog(onConfirm: (String) -> Unit, onCancel: () -> Unit) {
+private fun RallyNameDialog(onConfirm: (String, Int) -> Unit, onCancel: () -> Unit) {
     var name by remember { mutableStateOf("") }
+    var radius by remember { mutableStateOf(100) }
     AlertDialog(
         onDismissRequest = onCancel,
         shape = RoundedCornerShape(22.dp),
@@ -746,24 +766,33 @@ private fun RallyNameDialog(onConfirm: (String) -> Unit, onCancel: () -> Unit) {
             }
         },
         text = {
-            OutlinedTextField(
-                value = name,
-                onValueChange = { name = it },
-                singleLine = true,
-                shape = RoundedCornerShape(14.dp),
-                label = { Text(stringResource(R.string.rally_name_label)) },
-                placeholder = { Text(stringResource(R.string.rally_default_name)) },
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = ZzColor.Target,
-                    focusedLabelColor = ZzColor.Target,
-                    cursorColor = ZzColor.Target,
-                ),
-                modifier = Modifier.fillMaxWidth(),
-            )
+            Column {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    singleLine = true,
+                    shape = RoundedCornerShape(14.dp),
+                    label = { Text(stringResource(R.string.rally_name_label)) },
+                    placeholder = { Text(stringResource(R.string.rally_default_name)) },
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = ZzColor.Target,
+                        focusedLabelColor = ZzColor.Target,
+                        cursorColor = ZzColor.Target,
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Text(
+                    text = stringResource(R.string.rally_radius),
+                    color = ZzColor.InkSoft,
+                    fontSize = 12.5.sp,
+                    modifier = Modifier.padding(top = 12.dp, bottom = 6.dp),
+                )
+                RadiusChips(radius) { radius = it }
+            }
         },
         confirmButton = {
             Button(
-                onClick = { onConfirm(name.trim().ifBlank { "集结点" }) },
+                onClick = { onConfirm(name.trim().ifBlank { "集结点" }, radius) },
                 colors = ButtonDefaults.buttonColors(containerColor = ZzColor.Target),
             ) {
                 Text(stringResource(R.string.create))
@@ -771,6 +800,24 @@ private fun RallyNameDialog(onConfirm: (String) -> Unit, onCancel: () -> Unit) {
         },
         dismissButton = { TextButton(onClick = onCancel) { Text(stringResource(R.string.cancel), color = ZzColor.InkSoft) } },
     )
+}
+
+@Composable
+private fun RadiusChips(selected: Int, onSelect: (Int) -> Unit) {
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        listOf(50, 100, 200, 500).forEach { r ->
+            val active = r == selected
+            OutlinedButton(
+                onClick = { onSelect(r) },
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp),
+                colors = ButtonDefaults.outlinedButtonColors(
+                    contentColor = if (active) ZzColor.Target else ZzColor.InkSoft,
+                ),
+            ) {
+                Text("${r}m", fontSize = 12.5.sp, fontWeight = if (active) FontWeight.Bold else FontWeight.Normal)
+            }
+        }
+    }
 }
 
 @Composable

@@ -44,6 +44,8 @@ data class RallyPoint(
     val lng: Double = 0.0,
     val createdByDeviceId: String = "",
     val createdAt: Long = 0,
+    /** Arrival geofence radius in meters. */
+    val radius: Int = 100,
 )
 
 data class TrackPoint(

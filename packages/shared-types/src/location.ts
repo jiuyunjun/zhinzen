@@ -34,6 +34,8 @@ export interface RallyPoint {
   lng: number;
   createdByDeviceId: string;
   createdAt: Millis;
+  /** Arrival geofence radius in meters (default applied by clients if absent). */
+  radius?: number;
 }
 
 /**

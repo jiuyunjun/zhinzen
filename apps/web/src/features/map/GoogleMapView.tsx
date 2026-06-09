@@ -91,6 +91,7 @@ export function GoogleMapView({
   const markersRef = useRef<Map<string, google.maps.Marker>>(new Map());
   const rallyMarkersRef = useRef<Map<string, google.maps.Marker>>(new Map());
   const trackSegmentsRef = useRef<google.maps.Polyline[]>([]);
+  const rallyCircleRef = useRef<google.maps.Circle | null>(null);
   const onUserPanRef = useRef(onUserPan);
   const onLongPressRef = useRef(onLongPress);
   const onSelectRallyRef = useRef(onSelectRally);
@@ -170,6 +171,8 @@ export function GoogleMapView({
       markersRef.current.clear();
       clearMarkers(rallyMarkersRef.current);
       rallyMarkersRef.current.clear();
+      rallyCircleRef.current?.setMap(null);
+      rallyCircleRef.current = null;
       clearTrackSegments(trackSegmentsRef.current);
       trackSegmentsRef.current = [];
       mapRef.current = null;
@@ -189,7 +192,25 @@ export function GoogleMapView({
     syncRallyMarkers(map, rallyMarkersRef.current, rallyPoints, selectedRallyId, (id) =>
       onSelectRallyRef.current(id),
     );
-  }, [rallyPoints, selectedRallyId]);
+
+    // Show the geofence radius circle for the selected rally point.
+    rallyCircleRef.current?.setMap(null);
+    rallyCircleRef.current = null;
+    if (selectedRally) {
+      rallyCircleRef.current = new google.maps.Circle({
+        map,
+        center: { lat: selectedRally.lat, lng: selectedRally.lng },
+        radius: selectedRally.radius ?? 100,
+        strokeColor: '#7c3aed',
+        strokeOpacity: 0.8,
+        strokeWeight: 2,
+        fillColor: '#7c3aed',
+        fillOpacity: 0.1,
+        clickable: false,
+        zIndex: 3,
+      });
+    }
+  }, [rallyPoints, selectedRallyId, selectedRally]);
 
   useEffect(() => {
     const map = mapRef.current;

@@ -5,6 +5,19 @@
 
 ---
 
+## 2026-06-09 — 集结点可单独设半径 + 点击显示范围圈（web+app，已部署）✅
+
+- `RallyPoint` 增 `radius`(默认 100m);RTDB 规则加 radius 校验(20–2000m,已部署)。
+- **创建时选半径**:命名弹框加 50/100/200/500m 预设;**详情可改**(创建者/房主),写
+  `rallyPoints/{room}/{id}/radius`(web `updateRallyRadius`,android `Backend.updateRallyRadius`)。
+- **点击显示范围圈**:选中集结点时地图画半径圆(web `google.maps.Circle`,android maps-compose
+  `Circle`),详情显示「提醒范围 X m」。
+- **到达判定按各自半径**:进 `radius` / 出 `radius*1.5`(滞回)。删掉之前的固定 120/180 常量。
+
+**验证**:rules 已部署;web build+deploy;android `assembleDebug` + APK。
+
+---
+
 ## 2026-06-09 — 到达提醒 + 低电量提醒 + 戳一戳/快捷消息（web+app，已部署）✅
 
 为家人/情侣场景做的一批提醒类功能(用户选:到达提醒、戳一戳、低电量、安卓系统通知)。

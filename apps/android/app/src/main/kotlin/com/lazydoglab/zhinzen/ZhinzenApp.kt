@@ -67,6 +67,7 @@ fun ZhinzenApp(viewModel: AppViewModel = viewModel()) {
                         onConfirmRally = viewModel::confirmRally,
                         onCancelRally = viewModel::cancelRally,
                         onDeleteRally = viewModel::deleteRally,
+                        onSetRallyRadius = viewModel::setRallyRadius,
                         onToggleSharing = { viewModel.updateSharing(!viewModel.sharing) },
                         onToggleHeadingUp = viewModel::toggleHeadingUp,
                     )

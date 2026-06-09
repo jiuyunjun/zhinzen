@@ -25,6 +25,7 @@
     <string name="new_rally">New rally point</string>
     <string name="rally_default_name">Rally point</string>
     <string name="rally_name_label">Rally point name</string>
+    <string name="rally_radius">Alert radius</string>
     <string name="family_room_set">Set as family room — auto-opens next time</string>
     <string name="family_room_unset">Family room cleared</string>
     <string name="alert_channel">Alerts</string>

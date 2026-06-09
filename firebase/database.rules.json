@@ -31,6 +31,7 @@
           "lng": { ".validate": "newData.isNumber() && newData.val() >= -180 && newData.val() <= 180" },
           "createdByDeviceId": { ".validate": "newData.isString()" },
           "createdAt": { ".validate": "newData.isNumber()" },
+          "radius": { ".validate": "newData.isNumber() && newData.val() >= 20 && newData.val() <= 2000" },
           "$other": { ".validate": false }
         }
       }

@@ -411,13 +411,15 @@ function OtherPanel({
 export function RallyDetailPanel({
   point,
   ownLocation,
-  canDelete,
+  canEdit,
+  onSetRadius,
   onDelete,
   onClose,
 }: {
   point: RallyPoint;
   ownLocation: LiveLocation | null;
-  canDelete: boolean;
+  canEdit: boolean;
+  onSetRadius: (radius: number) => void;
   onDelete: () => void;
   onClose: () => void;
 }) {
@@ -441,12 +443,41 @@ export function RallyDetailPanel({
   return (
     <section>
       <PanelHeader name={`📍 ${point.name}`} accent="#7c3aed" status="online" onClose={onClose} />
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 8, marginTop: 12 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 12 }}>
         <Metric
           label={t('distance')}
           value={distance ? `${distance.value} ${t(distance.unit)}` : t('unknown')}
         />
+        <Metric label={t('rallyRadius')} value={`${point.radius ?? 100} m`} />
       </div>
+      {canEdit && (
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
+          {[50, 100, 200, 500].map((r) => {
+            const active = (point.radius ?? 100) === r;
+            return (
+              <button
+                key={r}
+                type="button"
+                onClick={() => onSetRadius(r)}
+                style={{
+                  height: 32,
+                  padding: '0 12px',
+                  borderRadius: 10,
+                  border: `1.5px solid ${active ? '#7c3aed' : tokens.line}`,
+                  background: active ? withAlpha('#7c3aed', 0.1) : '#fff',
+                  color: active ? '#7c3aed' : tokens.inkSoft,
+                  fontFamily: 'inherit',
+                  fontSize: 12.5,
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                }}
+              >
+                {r}m
+              </button>
+            );
+          })}
+        </div>
+      )}
       <DirectionPointer
         available={relativeDirection !== null}
         rotation={relativeDirection ?? 0}
@@ -477,7 +508,7 @@ export function RallyDetailPanel({
         <Icon name="nav" size={17} />
         {t('navigate')}
       </button>
-      {canDelete && (
+      {canEdit && (
         <button
           type="button"
           onClick={onDelete}

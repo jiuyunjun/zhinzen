@@ -22,11 +22,16 @@ export function watchRallyPoints(roomId: string, cb: (points: RallyPoint[]) => v
 
 export async function createRallyPoint(
   roomId: string,
-  point: { name: string; lat: number; lng: number; createdByDeviceId: string },
+  point: { name: string; lat: number; lng: number; createdByDeviceId: string; radius: number },
 ): Promise<void> {
   const { database } = getFirebaseServices();
   const id = push(ref(database, rallyPath(roomId))).key as string;
   await set(ref(database, `${rallyPath(roomId)}/${id}`), { ...point, createdAt: Date.now() });
+}
+
+export async function updateRallyRadius(roomId: string, id: string, radius: number): Promise<void> {
+  const { database } = getFirebaseServices();
+  await set(ref(database, `${rallyPath(roomId)}/${id}/radius`), radius);
 }
 
 export async function deleteRallyPoint(roomId: string, id: string): Promise<void> {

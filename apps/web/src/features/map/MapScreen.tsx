@@ -17,7 +17,12 @@ import { updateRoomMembers } from '../../lib/roomHistory';
 import { getFamilyRoom, setFamilyRoom } from '../../lib/familyRoom';
 import { fetchRecentTrackPoints } from '../../lib/trackApi';
 import { calculateDistance } from '@zhinzen/geo-utils';
-import { createRallyPoint, deleteRallyPoint, watchRallyPoints } from '../../lib/rallyApi';
+import {
+  createRallyPoint,
+  deleteRallyPoint,
+  updateRallyRadius,
+  watchRallyPoints,
+} from '../../lib/rallyApi';
 import { sendPoke, watchPokes } from '../../lib/pokeApi';
 import { GoogleMapView } from './GoogleMapView';
 import { MemberDetailPanel, RallyDetailPanel } from './MemberDetailPanel';
@@ -146,8 +151,9 @@ export function MapScreen({ onLeave }: { onLeave: () => void }) {
       for (const rp of rallyPoints) {
         const key = `${m.member.deviceId}|${rp.id}`;
         const d = calculateDistance(m.location, rp);
+        const r = rp.radius ?? 100;
         const prev = geofenceInsideRef.current[key];
-        const inside = prev ? d < 180 : d < 120;
+        const inside = prev ? d < r * 1.5 : d < r;
         if (prev !== undefined && prev !== inside) {
           flash(inside ? t('alertArrived', { name, place: rp.name }) : t('alertLeft', { name, place: rp.name }));
           haptics.success();
@@ -178,13 +184,16 @@ export function MapScreen({ onLeave }: { onLeave: () => void }) {
     haptics.tap();
     setPendingRally({ lat, lng });
   };
-  const onConfirmRally = (name: string) => {
+  const onConfirmRally = (name: string, radius: number) => {
     const at = pendingRally;
     setPendingRally(null);
     if (!at || !roomId) return;
-    void createRallyPoint(roomId, { name, lat: at.lat, lng: at.lng, createdByDeviceId: deviceId })
+    void createRallyPoint(roomId, { name, lat: at.lat, lng: at.lng, createdByDeviceId: deviceId, radius })
       .then(() => haptics.success())
       .catch(() => flash(t('rallyFailed')));
+  };
+  const onSetRallyRadius = (id: string, radius: number) => {
+    if (roomId) void updateRallyRadius(roomId, id, radius).then(() => haptics.tap());
   };
   const onSelectRally = (id: string) => {
     setSelectedDeviceId(null);
@@ -573,9 +582,10 @@ export function MapScreen({ onLeave }: { onLeave: () => void }) {
           <RallyDetailPanel
             point={selectedRally}
             ownLocation={effectiveOwnLocation}
-            canDelete={
+            canEdit={
               selectedRally.createdByDeviceId === deviceId || createdByDeviceId === deviceId
             }
+            onSetRadius={(r) => onSetRallyRadius(selectedRally.id, r)}
             onDelete={() => onDeleteRally(selectedRally.id)}
             onClose={() => setSelectedRallyId(null)}
           />
@@ -613,10 +623,11 @@ function RallyNameDialog({
 }: {
   initial: string;
   onCancel: () => void;
-  onConfirm: (name: string) => void;
+  onConfirm: (name: string, radius: number) => void;
 }) {
   const t = useUiStore((s) => s.t);
   const [name, setName] = useState(initial);
+  const [radius, setRadius] = useState(100);
   return (
     <div
       onClick={onCancel}
@@ -643,7 +654,7 @@ function RallyNameDialog({
           onChange={(e) => setName(e.target.value)}
           autoFocus
           onKeyDown={(e) => {
-            if (e.key === 'Enter' && name.trim()) onConfirm(name.trim());
+            if (e.key === 'Enter' && name.trim()) onConfirm(name.trim(), radius);
           }}
           style={{
             width: '100%',
@@ -657,6 +668,32 @@ function RallyNameDialog({
             outline: 'none',
           }}
         />
+        <div style={{ fontSize: 12.5, color: tokens.inkSoft, margin: '14px 0 6px' }}>
+          {t('rallyRadius')}
+        </div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          {[50, 100, 200, 500].map((r) => (
+            <button
+              key={r}
+              type="button"
+              onClick={() => setRadius(r)}
+              style={{
+                height: 34,
+                padding: '0 14px',
+                borderRadius: 11,
+                border: `1.5px solid ${radius === r ? '#7c3aed' : tokens.line}`,
+                background: radius === r ? withAlpha('#7c3aed', 0.1) : '#fff',
+                color: radius === r ? '#7c3aed' : tokens.inkSoft,
+                fontFamily: 'inherit',
+                fontWeight: 700,
+                fontSize: 13,
+                cursor: 'pointer',
+              }}
+            >
+              {r}m
+            </button>
+          ))}
+        </div>
         <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
           <button
             type="button"
@@ -678,7 +715,7 @@ function RallyNameDialog({
           <button
             type="button"
             disabled={!name.trim()}
-            onClick={() => onConfirm(name.trim())}
+            onClick={() => onConfirm(name.trim(), radius)}
             style={{
               flex: 1,
               height: 42,

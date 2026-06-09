@@ -96,7 +96,7 @@ object Backend {
     }
 
     /** Create a rally point (direct RTDB write). */
-    suspend fun createRally(roomId: String, name: String, lat: Double, lng: Double, createdBy: String) {
+    suspend fun createRally(roomId: String, name: String, lat: Double, lng: Double, createdBy: String, radius: Int) {
         val ref = database.getReference("rallyPoints/$roomId").push()
         ref.setValue(
             hashMapOf(
@@ -105,8 +105,14 @@ object Backend {
                 "lng" to lng,
                 "createdByDeviceId" to createdBy,
                 "createdAt" to System.currentTimeMillis(),
+                "radius" to radius,
             ),
         ).await()
+    }
+
+    /** Change a rally point's geofence radius (creator/owner gated in UI). */
+    suspend fun updateRallyRadius(roomId: String, id: String, radius: Int) {
+        database.getReference("rallyPoints/$roomId/$id/radius").setValue(radius).await()
     }
 
     /** Send a poke / quick message (direct RTDB write). */
