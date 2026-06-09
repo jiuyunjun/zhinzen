@@ -639,6 +639,33 @@ UWB 能力：
 
 ---
 
+### 5.9 家人/协作增强功能（已实现）
+
+围绕"和家人/对象长期共享"的一组功能(web + app 一致):
+
+1. **家人房间**：把某房间设为家人房间(地图顶栏 ★,存设备本地);打开 App 若设了它 + 有名字 +
+   无邀请链接,自动加入直接进地图。后端 `joinRoom` 把过期时间**滑动续期到 now+30 天**,
+   日常会开就不过期(`SLIDING_ROOM_TTL_MS`)。
+2. **房主踢人**：`createRoom`/`joinRoom` 返回 `createdByDeviceId`;房主在成员详情可「踢出」,
+   调 `kickMember` 函数删成员 doc+session+RTDB live/tracks。被踢端发现自己不在成员列表→自动离开。
+   仅移除,可重新加入(无黑名单)。
+3. **新成员加入提醒**：客户端 diff 成员列表,新成员 → 全员**应用内**提示 + 震动(非推送)。
+4. **电量**：上报 `liveLocation.battery`(web Battery API / android BatteryManager);成员详情显示。
+5. **集结点（可多个）**：RTDB `rallyPoints/{roomId}/{id}`,长按地图新增并命名;像成员一样上地图+
+   底部列表,可看距离/方向/导航;**每个点可单独设提醒半径**(50/100/200/500m,创建/详情可改),
+   选中时地图画出范围圈。创建者或房主可删/改。
+6. **到达/离开提醒**：把集结点当地理围栏,对每个其他成员算距离,进 `radius` / 出 `radius×1.5`
+   (滞回)跨越时提醒「X 到达/离开 <地点>」。
+7. **低电量提醒**：对方电量 <15% 提醒一次(回 ≥25% 复位)。
+8. **戳一戳/快捷消息**：RTDB `pokes/{roomId}/{id}`;成员详情一键发「👋戳一戳/我到了/等我5分钟/
+   在哪呢」,对方手机震动+提示。收端只对"订阅之后、发给自己或广播"的 poke 触发。
+
+**通知**：android 用高优先级通知渠道(`util/Notifier`)弹系统通知,后台进程存活时也能收到;
+web 为应用内 toast。**限制**：彻底杀掉 App(进程没了)收不到 → 真正离线推送需接 FCM(未做)。
+geofence/battery 评估在客户端进行(android VM、web effect)。
+
+---
+
 ## 6. 后端设计
 
 ### 6.1 技术选型
@@ -663,7 +690,7 @@ Cloud Storage
 ```text
 Firebase Hosting：部署 Web
 Firestore：保存房间、成员、配置
-Realtime Database：在线状态、实时位置、轨迹点、UWB 信令（高频/低延迟，按流量计费）
+Realtime Database：在线状态、实时位置、轨迹点、集结点、戳一戳、UWB 信令（高频/低延迟，按流量计费）
 Cloud Functions：创建/加入房间、校验写入、pruneExpiredRooms 定时清理
 App Check：降低非法客户端调用风险
 Google Maps Platform：地图显示和导航
@@ -747,9 +774,24 @@ liveLocations/{roomId}/{deviceId}
   "heading": 90,
   "speed": 1.2,
   "updatedAt": 1710000000000,
-  "sharingLocation": true
+  "sharingLocation": true,
+  "battery": 80
 }
 ```
+
+> `battery`（0–100）可选;无电量 API 的端(iOS/Firefox)不带。`rooms.expiresAt` 由 `joinRoom`
+> 滑动续期(见 §5.9)。
+
+---
+
+#### rallyPoints / pokes（存 RTDB，客户端直写，见 §5.9）
+
+```text
+rallyPoints/{roomId}/{id}  = { name, lat, lng, createdByDeviceId, createdAt, radius }
+pokes/{roomId}/{id}        = { from, fromName, to, text, createdAt }
+```
+
+`pruneExpiredRooms` 在房间过期时一并清除 `liveLocations`/`tracks`/`rallyPoints`/`pokes`/`rooms(uwb)`。
 
 ---
 
