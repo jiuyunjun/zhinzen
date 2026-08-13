@@ -45,9 +45,18 @@ import kotlinx.coroutines.launch
 
 enum class Phase { Onboarding, Room, Map }
 
+/** What follow mode is tracking: another member, or a rally point. */
+data class FollowTarget(val isRally: Boolean, val id: String)
+
 // Low-battery alert thresholds (with hysteresis). Geofence radius is per rally point.
 private const val LOW_BATTERY_PCT = 15
 private const val BATTERY_RESET_PCT = 25
+
+/**
+ * At or above this ground speed (m/s ≈ 11km/h) the GPS course over ground beats the
+ * magnetometer as a heading source — see design.md §5.10.
+ */
+private const val GPS_HEADING_MIN_SPEED_MPS = 3.0
 
 /**
  * App state + backend orchestration. Mirrors the web's device/room/members/
@@ -67,6 +76,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val estimators = mutableMapOf<String, NearbyEstimator>()
     private var lastHistoryMembers: List<String> = emptyList()
     private var lastTrackFetchAt = 0L
+    // Incremental track fetch: which device the held trackPoints belong to, and the
+    // createdAt of the newest point we hold (so refreshes fetch only newer points).
+    private var trackTargetId: String? = null
+    private var lastTrackCreatedAt = 0L
     private var pendingInvite: String? = null
     private var prevMemberIds: Set<String>? = null
     private var seenSelf = false
@@ -111,9 +124,23 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     /** Device compass heading (degrees, 0 = north), or null if unavailable. */
     var deviceHeading by mutableStateOf<Float?>(null)
         private set
+    /** True while the compass is active but its accuracy is low → prompt a figure-8. */
+    var compassNeedsCalibration by mutableStateOf(false)
+        private set
     /** When true, the map rotates to follow the device compass (heading-up). */
     var headingUp by mutableStateOf(false)
         private set
+    /**
+     * Follow mode target (design.md §5.10), kept separate from [selectedDeviceId]:
+     * the detail sheet gets closed (or another member tapped) while riding, and the
+     * camera must keep framing the pair regardless.
+     */
+    var followTarget by mutableStateOf<FollowTarget?>(null)
+        private set
+    /** True after the user panned the map: the session lives on, the camera doesn't. */
+    var followPaused by mutableStateOf(false)
+        private set
+    private var headingUpBeforeFollow = false
     var roomHistory by mutableStateOf<List<RoomHistoryEntry>>(roomHistoryStore.list())
         private set
     /** Recent track points of the currently selected (other) member. */
@@ -198,8 +225,16 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         } else {
             stopUwb()
         }
-        // Show the selected member's track, or your own when nothing/self is selected.
-        fetchTrack(selectedDeviceId ?: this.deviceId)
+        // Show a track only for the explicitly selected member — including yourself
+        // when you tap your own avatar. Nothing selected → clear the track.
+        val target = selectedDeviceId
+        if (target != null) {
+            fetchTrack(target)
+        } else {
+            trackPoints = emptyList()
+            trackTargetId = null
+            lastTrackCreatedAt = 0L
+        }
         updateCompass()
     }
 
@@ -374,29 +409,153 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         updateCompass()
     }
 
+    // ---- Follow mode (design.md §5.10) -------------------------------------
+
+    /** Start (or switch) a follow session; heading-up is forced on for its duration. */
+    fun startFollow(target: FollowTarget) {
+        if (followTarget == null) headingUpBeforeFollow = headingUp
+        followTarget = target
+        followPaused = false
+        headingUp = true
+        haptics.light()
+        refreshFollowInfo()
+        updateCompass()
+    }
+
+    fun stopFollow() {
+        if (followTarget == null) return
+        followTarget = null
+        followPaused = false
+        headingUp = headingUpBeforeFollow
+        haptics.tap()
+        refreshFollowInfo()
+        updateCompass()
+    }
+
+    /** The user grabbed the map: keep the session, hand back the camera. */
+    fun pauseFollow() {
+        if (followTarget != null) followPaused = true
+    }
+
+    fun resumeFollow() {
+        if (followTarget == null) return
+        followPaused = false
+        haptics.tap()
+    }
+
+    /**
+     * Where follow mode is aiming (lat to lng), and the target's name / fix age.
+     * These *stick*: if the target goes offline, stops sharing or drops out of the
+     * feed, we keep the last known position — losing their signal is exactly when
+     * you most want the camera parked where they were. A session only ever ends when
+     * the user ends it.
+     */
+    var followPoint by mutableStateOf<Pair<Double, Double>?>(null)
+        private set
+    var followName by mutableStateOf<String?>(null)
+        private set
+    /** `updatedAt` of the fix behind [followPoint], or null for a rally point. */
+    var followUpdatedAt by mutableStateOf<Long?>(null)
+        private set
+
+    private fun refreshFollowInfo() {
+        val target = followTarget
+        if (target == null) {
+            followPoint = null
+            followName = null
+            followUpdatedAt = null
+            return
+        }
+        if (target.isRally) {
+            rallyPoints.firstOrNull { it.id == target.id }?.let {
+                followPoint = it.lat to it.lng
+                followName = it.name
+                followUpdatedAt = null
+            }
+        } else {
+            members.firstOrNull { it.member.deviceId == target.id }?.let { mv ->
+                followName = mv.member.displayName
+                mv.location?.let {
+                    followPoint = it.lat to it.lng
+                    followUpdatedAt = it.updatedAt
+                }
+            }
+        }
+    }
+
+    /**
+     * Heading to point the map at: the GPS course over ground while actually moving,
+     * the compass otherwise. A magnetometer next to a bike/car mount drifts badly —
+     * the same drift the figure-8 calibration prompt reacts to.
+     */
+    val followHeading: Float?
+        get() = gpsHeading ?: deviceHeading
+
+    /** True while [followHeading] comes from GPS (sparse samples → more smoothing). */
+    val headingFromGps: Boolean
+        get() = gpsHeading != null
+
+    private val gpsHeading: Float?
+        get() {
+            val loc = ownLocation ?: return null
+            val gps = loc.heading ?: return null
+            return if (loc.speed >= GPS_HEADING_MIN_SPEED_MPS) gps.toFloat() else null
+        }
+
     /** The compass runs while in heading-up mode or while pointing at another member. */
     private fun updateCompass() {
         val wanted =
-            headingUp || (selectedDeviceId != null && selectedDeviceId != deviceId) || selectedRallyId != null
+            headingUp ||
+                followTarget != null ||
+                (selectedDeviceId != null && selectedDeviceId != deviceId) ||
+                selectedRallyId != null
         if (wanted) startCompass() else stopCompass()
     }
 
     private fun fetchTrack(targetDeviceId: String) {
         val rid = roomId ?: return
         lastTrackFetchAt = System.currentTimeMillis()
+        val windowMs = 24 * 60 * 60 * 1000L
+        // Full 24h load when the target changed (or first load); otherwise fetch only
+        // points newer than the latest we hold. Re-downloading the whole 24h window
+        // every 10s was the main source of jank on long tracks.
+        val full = targetDeviceId != trackTargetId || lastTrackCreatedAt == 0L
+        val since = if (full) System.currentTimeMillis() - windowMs else lastTrackCreatedAt
         viewModelScope.launch {
-            val since = System.currentTimeMillis() - 24 * 60 * 60 * 1000L
             runCatching { Backend.fetchTrack(rid, targetDeviceId, since) }
-                // Ignore stale results: only apply if this is still the active target
-                // (the selected member, or self when nothing is selected).
-                .onSuccess { if ((selectedDeviceId ?: deviceId) == targetDeviceId) trackPoints = it }
+                // Ignore stale results: only apply if this device is still the selected
+                // target. (Don't fall back to `deviceId` — if you tap your own avatar then
+                // close the panel before the fetch returns, the track must NOT appear.)
+                .onSuccess { fetched ->
+                    if (selectedDeviceId != targetDeviceId) return@onSuccess
+                    val cutoff = System.currentTimeMillis() - windowMs
+                    if (full) {
+                        trackTargetId = targetDeviceId
+                        trackPoints = fetched
+                        lastTrackCreatedAt = fetched.lastOrNull()?.createdAt ?: 0L
+                    } else {
+                        // startAt is inclusive of the boundary point; keep only newer ones.
+                        val last = lastTrackCreatedAt
+                        val fresh = fetched.filter { it.createdAt > last }
+                        val next = (if (fresh.isEmpty()) trackPoints else trackPoints + fresh)
+                            .filter { it.createdAt >= cutoff }
+                        if (fresh.isEmpty() && next.size == trackPoints.size) return@onSuccess
+                        trackPoints = next
+                        if (fresh.isNotEmpty()) lastTrackCreatedAt = fresh.last().createdAt
+                    }
+                }
         }
     }
 
     private fun startCompass() {
         if (compassJob != null || !compassController.isAvailable()) return
         compassJob = viewModelScope.launch {
-            compassController.headings().collect { deviceHeading = it }
+            compassController.readings().collect { reading ->
+                if (!reading.heading.isNaN()) deviceHeading = reading.heading
+                // LOW(1)/UNRELIABLE(0) → ask the user to wave a figure-8 to recalibrate.
+                compassNeedsCalibration =
+                    reading.accuracy <= android.hardware.SensorManager.SENSOR_STATUS_ACCURACY_LOW
+            }
         }
     }
 
@@ -404,6 +563,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         compassJob?.cancel()
         compassJob = null
         deviceHeading = null
+        compassNeedsCalibration = false
     }
 
     fun removeHistory(roomId: String) {
@@ -458,6 +618,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun leaveRoom() {
         haptics.tap()
         headingUp = false
+        followTarget = null
+        followPaused = false
+        headingUpBeforeFollow = false
+        followPoint = null
+        followName = null
+        followUpdatedAt = null
         stopLocation()
         // Mark not-sharing right away so peers see us leave immediately, the same as
         // when the app is closed (RTDB onDisconnect). Web does the same on leave.
@@ -476,6 +642,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         selectedDeviceId = null
         createdByDeviceId = null
         trackPoints = emptyList()
+        trackTargetId = null
+        lastTrackCreatedAt = 0L
         members.clear()
         phase = Phase.Room
     }
@@ -574,6 +742,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     if (selectedRallyId != null && rallyPoints.none { it.id == selectedRallyId }) {
                         selectedRallyId = null
                     }
+                    refreshFollowInfo()
                 }
 
                 override fun onCancelled(error: DatabaseError) {}
@@ -676,14 +845,17 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 lastHistoryMembers = names
                 roomHistory = roomHistoryStore.updateMembers(rid, names)
             }
-            // Live-grow the active track (own or selected) as positions come in.
-            if (System.currentTimeMillis() - lastTrackFetchAt > 10_000L) {
-                fetchTrack(selectedDeviceId ?: deviceId)
+            // Live-grow the active track (the selected member, if any) as positions come in.
+            val trackTarget = selectedDeviceId
+            if (trackTarget != null && System.currentTimeMillis() - lastTrackFetchAt > 10_000L) {
+                fetchTrack(trackTarget)
             }
         }
         if (selectedDeviceId != null && views.none { it.member.deviceId == selectedDeviceId }) {
             selectMember(null)
         }
+        // Follow never auto-ends: refresh the last known position and keep aiming.
+        refreshFollowInfo()
     }
 
     // Location is driven by a foreground service so it keeps running in the

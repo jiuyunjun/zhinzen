@@ -5,6 +5,350 @@
 
 ---
 
+## 2026-08-13 — 追踪模式返工：以我为旋转圆心 + 每帧驱动 + 永不自动解除（web 已部署 + APK）✅
+
+真机反馈两个问题:「手感太怪」+「点追踪后过几秒自己解除」。都修了,design.md §5.10 已同步改写。
+
+**1) 自己解除追踪(bug)**:自动结束条件用了成员状态 `status != notSharing`,而 `deriveStatus`
+里 `!member.online` 也会翻成 offline/notSharing——`member.online` 这个 Firestore 字段本就不可靠
+(§4.4 早有记录,从不复位),一抖就秒退。
+**改法(用户明确要求)**:**除手动退出外永不自动解除**;目标离线/停共享/掉出列表/集结点被删,
+都继续追**最后一次已知位置**并显示该位置年龄。最后已知点要**粘住**:web `lastFollowRef`,
+android VM `refreshFollowInfo()` 只在拿到新值时覆盖(`followPoint/followName/followUpdatedAt`
+改成 state)。两端的自动 stopFollow 代码已全部删除。
+
+**2) 手感(两个根因)**
+- **旋转圆心不是我**(用户直接指出):相机中心原来取**两人中点**,而地图绕相机中心转 →
+  我自己在屏幕上公转。改成**以我为锚点**:中心跟我走,我钉在屏幕**中央偏下**
+  (`ANCHOR_FRAC=0.62`),缩放按"以我为心、半径够到对方"算(`needM = 距离 + 40m`,
+  `radiusPx = min(可用宽/2, 锚点到上/下边距)`)。**并且 center 每帧用当前 bearing 重算**——
+  转向时相机中心要绕我公转才能把我钉住;原来只在位置更新(~1s)时算一次,方向早就错了。
+- **补间动画互相 cancel**:原来 android 用两个 `cameraPositionState.animate`(旋转 + 取景),
+  每个罗盘样本(~25Hz)重启一次 400ms 缓动 → 永远只播缓动最慢的开头 = 又粘又拖。
+  改成**单一每帧驱动器**:web `requestAnimationFrame`、android `withFrameNanos`,指数平滑
+  center/zoom/bearing 后**一次性**写相机(`moveCamera` / 直接赋值 `position`)。
+  用户手势中(android `cameraMoveStartedReason==GESTURE`)跳过写入,不和用户抢。
+- **朝向平滑分来源**:罗盘 τ=90ms(密集,跟手);GPS 航向 τ=450ms(一个位置包才一个,
+  不重平滑会猛甩)。新增 `headingFromGps` 参数贯穿两端。
+
+**新增常量**(`geo-utils/constants.ts` + android `MapScreen.kt` 镜像):`FOLLOW_ANCHOR_FRAC=0.62`、
+`CENTER_TAU=220ms`、`HEADING_TAU=90ms`、`GPS_HEADING_TAU=450ms`;删掉了不再需要的
+`RECENTER_M/RECENTER_MS`(每帧平滑取代了节流)。
+
+**验证**:typecheck + web build ✅ **已部署**;android `assembleDebug` ✅,APK 已更新。
+⚠️ 仍需真机确认手感;锚点位置(0.62)和三个 τ 是最可能要调的旋钮。
+
+---
+
+## 2026-08-13 — 追踪模式（跟车模式）P1 实现（web 已部署 + APK）✅
+
+按 §5.10 实现完毕,web + android 行为对齐。
+
+**共享算法**(`packages/geo-utils`,android 镜像在 `data/Geo.kt`):新增 `zoomForMeters()`
+(`metersPerPixel` 的反函数)+ `destinationPoint()`;`constants.ts` 新增 `DEFAULT_FOLLOW_*`
+一组调参(margin 40m / zoom 13–17.5 / 死区 0.35 / 5m·1s / GPS 航向阈值 3m/s)。
+
+**相机**(两端同算法):**没有用 fitBounds / newLatLngBounds**——它算正北向包围盒且会重置
+bearing,和 heading-up 冲突。改为外接圆:`needM = 两点距离 + 2×40m` → `zoomForMeters` →
+clamp → 中心取中点后沿**屏幕纵轴**(bearing+180°)下移 `(padB-padT)/2` 像素避开 sheet。
+三条防晕规则(zoom 死区 0.35 / center 5m 或 1s / 动画 400ms)全部落地。
+
+**朝向**:`followHeading` = speed ≥3m/s 且有 GPS heading 时用 GPS 航向,否则罗盘。
+- web:`GoogleMapView` 用 **rAF 缓动**(τ=80ms ≈220ms 收敛)驱动 `setHeading`,顺便吸收
+  GPS↔罗盘切换时的跳变,且**不产生 React 重渲染**。
+- android:**关键坑**——heading 动画和 follow 取景不能是两个 `animate()`(互相 cancel)。
+  合并成**单一相机驱动** `LaunchedEffect(headingUp, followHeading, followCam)`,一次
+  `CameraPosition` 同时给 target/zoom/bearing;follow 时每个罗盘样本都朝**期望中心**重新
+  补间,所以边转边平移都在推进。
+
+**状态**:`followTarget` 与 `selectedDeviceId` **解耦**;`followMode` 加 `'trackPaused'`——
+拖图只暂停(web `dragstart`,android `cameraMoveStartedReason==GESTURE`),顶栏条下出现
+「恢复追踪 X」胶囊;recenter/fitAll 也只暂停。目标离开房间/停止共享/集结点被删 → 自动退出。
+进入追踪强制 heading-up(退出时还原进入前的值),sheet 自动收到 peek。
+
+**UI**:成员/集结点详情顶部「◎ 追踪」主按钮(点头像行为不变);顶栏追踪条
+`◎ 名字 · 距离 · 箭头 · ✕`(暂停时变白底);android 罗盘校准横幅下移避让。
+strings zh/en:`follow` / `follow_stop` / `follow_resume`。
+
+**验证**:`npm run typecheck` + web build ✅ **已部署 (zhinzen.web.app)**;android
+`assembleDebug` ✅,APK 已覆盖 `dist/zhinzen-0.1.0-debug.apk`。
+⚠️ **未真机验证**:相机手感(死区/时长)、GPS 航向切换、web 需 vector Map ID 才会旋转。
+已知取舍:web 捏合缩放不会触发暂停(Maps JS 无法可靠区分),拖动可以;android 两者都可以。
+**没做**:掉队提醒(用户明确本期不做)。
+
+---
+
+## 2026-08-13 — 设计：追踪模式（跟车模式）写入 design.md §5.10（仅文档，未实现）📝
+
+用户场景:和朋友骑车/开车出行,想动态知道朋友在自己哪个方向、多远。与用户确认后定稿设计,
+已写入 `design.md §5.10`。**尚未写任何代码。**
+
+**已定的产品决策**(用户拍板):入口=详情面板「◎ 追踪」按钮(不改点头像行为);
+追踪中手动拖图=**暂停**并显示「恢复追踪」胶囊(不退出);「掉队提醒」**本期不做**。
+
+**关键设计点**(实现时别踩):
+1. **不能用 fitBounds**——它算正北向包围盒且会重置 heading,与 heading-up 直接冲突。
+   改为自算相机:**外接圆**(needM = 两点距离 + 2×40m 边距)→ `zoomForMeters()`(新,
+   `metersPerPixel` 的反函数,geo-utils + TrackSimplify 各一份)→ clamp[13, 17.5]。
+2. **朝向优先用 GPS heading**(speed ≥3m/s 时),罗盘只在静止/慢速兜底——车架磁铁会让
+   磁力计漂,这正是 `compassNeedsCalibration` 的成因。`LiveLocation.heading/speed` 已在采集。
+3. **三条防晕规则**:zoom 死区 0.35 / center 阈值 5m 或 1s / 动画 400ms(bearing 220ms)。
+4. `followTarget` 与 `selectedDeviceId` **解耦**(sheet 收起后追踪要继续);
+   `followMode` 加 `'trackPaused'`。
+5. android 用 `GoogleMap(contentPadding)` 处理 sheet 偏心;web 无该 API,需手算像素偏移。
+
+**下一步**:P1 实现(geo-utils `zoomForMeters` → web MapScreen/GoogleMapView → android
+AppViewModel/MapScreen → zh/en strings),web 部署 + APK。
+
+---
+
+## 2026-06-17 — 修复：选自己头像后未等轨迹返回就关闭，轨迹仍会显示（安卓，已打 APK）✅
+
+Bug：点头像→轨迹异步拉取未返回前关掉详情→轨迹回来后仍渲染且不消失。
+根因：`fetchTrack` 的过期结果守卫用了 `(selectedDeviceId ?: deviceId) != targetDeviceId`——选**自己**头像时
+target=deviceId，取消选中后 `selectedDeviceId` 变 null，`?: deviceId` 回退又等于 deviceId → 守卫失效 → 应用了过期轨迹。
+修复：守卫改为 `selectedDeviceId != targetDeviceId`（不再回退；现在只有显式选中才显示轨迹）。
+取消选中后周期 grow 也不会再拉（已 gated 在 `selectedDeviceId != null`）。web 用 effect 取消机制，无此问题。
+
+**验证**：`assembleDebug` 通过，新 APK 覆盖 `dist/zhinzen-0.1.0-debug.apk`。
+
+---
+
+## 2026-06-17 — 安卓罗盘校准提示（已打 APK）✅
+
+罗盘校准本身是系统行为（画 8 字让磁力计重新校准），我们能做的是**检测精度低→提示用户**。
+- `CompassController`：`headings(): Flow<Float>` → `readings(): Flow<CompassReading(heading, accuracy)>`，
+  `onAccuracyChanged` 不再空着，把 rotation-vector 精度带出来（变化时立即 emit，静止也能提示）。
+- VM：新增 `compassNeedsCalibration`（accuracy ≤ `SENSOR_STATUS_ACCURACY_LOW` 即 0/1 → true），
+  `startCompass` 收 `readings`、`stopCompass` 复位。仅在罗盘启用时（heading-up / 指向成员或集结点）有效。
+- UI：`MapScreen` 加 `needsCompassCalibration` 参数；顶部栏下方显示琥珀色横幅「🧭 罗盘精度低，请画 8 字校准」，
+  可 ✕ 关闭（精度恢复后再次变低会重新出现）。strings 加 `compass_calibrate`(zh/en)。`ZhinzenApp` 透传。
+
+**验证**：`compileDebugKotlin`+`assembleDebug` 通过，新 APK 覆盖 `dist/zhinzen-0.1.0-debug.apk`。
+注：纯安卓（web 也能用 deviceorientation 的精度，但本次只按用户要求做 app）。
+
+---
+
+## 2026-06-16 — web 首屏优化：拆包 + 懒加载地图 + PWA（已部署）✅
+
+把原来单个 734KB 的 JS 拆开 + 让网页可安装/可缓存：
+1. **vendor 拆包**（`vite.config.ts` `manualChunks`）：firebase 与 react/react-dom 各自独立 chunk →
+   并行下载、跨部署长缓存（app 代码常变、vendor 不变）。`chunkSizeWarningLimit` 调到 600。
+2. **懒加载地图**（`App.tsx` `lazy(MapScreen)` + `Suspense`）：onboarding/room 首屏不含地图代码。
+3. **PWA**：`public/manifest.webmanifest` + `public/icon.svg`（蓝色定位针，any+maskable）+
+   `public/sw.js`（同源 `/assets/*` cache-first、导航 network-first 回退离线壳；**不碰**跨域
+   firebase/maps/字体）；`index.html` 加 manifest/icon/apple-* 标签；`main.tsx` 仅 PROD 注册 SW。
+
+**产物**：index 30KB(gz 11.6) / MapScreen 43KB(gz 13.8, 懒) / react 142KB(gz 45) / firebase 522KB(gz 124)。
+500KB 警告消失。SW/manifest 经 curl 确认是真实文件(firebase hosting 在 `**`→index 重写前先发静态文件)。
+
+**验证**：typecheck + 构建部署 (zhinzen.web.app)。
+**还可继续**：firebase(522KB) 仍首屏加载(stores 静态 import)；要更进一步可把 firebase 改成进房间时
+再懒初始化。iOS 的 apple-touch-icon 用的是 SVG，部分老 iOS 可能不认（需要 PNG）——影响很小。
+
+---
+
+## 2026-06-16 — 去掉点击变黑 + 缩放时不中途重建轨迹（web 部署 + APK）✅
+
+1. **点击拖拽条不再有变黑(ripple)**：android 两处 `clickable` 加
+   `interactionSource = remember { MutableInteractionSource() }, indication = null`。（web 无此问题）
+2. **缩放时轨迹不再中途重建（卡顿源）**：相机动画途中 zoom 连续变 → 每个整数 zoom 重建一次轨迹
+   (RDP+重画 polyline) = 卡。改成**等相机停稳再重建**，途中沿用旧 polyline（随地图变换，便宜）：
+   - android：`settledTrackKey`(size,zoomKey)，`LaunchedEffect(isMoving,size,zoom){ if(!isMoving) 更新 }`，
+     `buildSegments` 只 keyed 在 settledTrackKey 上。
+   - web：地图加 `zoom_changed`→`mapMovingRef=true`、`idle`→`false`+重建；`[trackPoints]` effect 仅在
+     非移动时立即重建，移动中交给 idle 收尾。新增 `trackPointsRef`/`mapMovingRef`。
+
+**验证**：web typecheck + 构建部署 (zhinzen.web.app)；android `compileDebugKotlin`+`assembleDebug`
+通过，新 APK 覆盖 `dist/zhinzen-0.1.0-debug.apk`。
+
+---
+
+## 2026-06-16 — sheet 顶部整条可拖/可点 + 横条收细 + 安卓集结点改回长按（web 部署 + APK）✅
+
+1. **可拖/可点区域扩大到名字那行**：详情打开时，在 sheet 顶部叠一层透明「拖拽条」(web 高 66px /
+   android 66dp)，覆盖 handle+名字，**右侧留出关闭按钮角**（web `right:54`，android `padding(end=54dp)`，
+   靠 modifier 顺序让该角落事件穿透到 ✕）。拖动→收/展，点击→展开。成员条(未选中)不叠，避免挡住头像点击。
+   - 露头时整条可点展开：web 收起态仍有 inset:0 透明层；android 拖拽条本身 clickable 展开。
+   - android 把底部从单 `Column` 改为 `Box{ Column + 顶部拖拽条 }`，offset/onSizeChanged 移到外层 Box。
+2. **横条 UI 收细**：38×5→**36×4**、颜色更浅(web `oklch(0.89 0.006 260)`，android `InkFaint α.3`)。
+3. **安卓加集结点改回长按**：`onMapClick` → `onMapLongClick`（单击太易误触；web 保持单击，因长按在
+   移动端网页不触发）。
+
+**验证**：web typecheck + 构建部署 (zhinzen.web.app)；android `compileDebugKotlin`+`assembleDebug`
+通过，新 APK 覆盖 `dist/zhinzen-0.1.0-debug.apk`。
+
+---
+
+## 2026-06-16 — sheet 拖拽范围加大 + 露头单击展开 + 点自己头像也缩放（web 部署 + APK）✅
+
+1. **拖拽范围更大**：露头 peek 96→**52**（web `SHEET_PEEK`，android `peekPx`），能滑下去更多。
+2. **露头时单击展开**：web——收起态(`!active && sheetOffset>8`)渲染一个透明 onClick 覆盖层，点
+   任意处 `setSheetOffset(0)`；android——handle Box 加 `clickable{ if(value>8) animateTo(0) }`
+   （与 `detectVerticalDragGestures` 共存：点=展开，拖=滑动）。
+3. **点「你」的头像也缩放到自己**：原来选自己只 followMode=self、不缩放。改成相机聚焦逻辑对
+   自己/他人/集结点统一：
+   - web：把原 track-effect 换成「选中即聚焦」effect，按 `pins.find(id==selectedDeviceId)`（含自己）
+     `panTo+setZoom(17)`；deps 只 `[selectedDeviceId, selectedRallyId]`（去掉 followMode/recenterSignal
+     避免与 recenter 冲突）。删掉不再用的 `targetLocation/targetLatLng`。self-follow effect 仍负责后续跟随。
+   - android：`LaunchedEffect(selectedDeviceId)` 用 `selected?.location`（不再 `takeIf{!isSelf}`）→
+     `smoothFocus(17f)`；首帧 `centered` 只定心一次，不冲突。
+
+**验证**：web typecheck + 构建部署 (zhinzen.web.app)；android `compileDebugKotlin`+`assembleDebug`
+通过，新 APK 覆盖 `dist/zhinzen-0.1.0-debug.apk`。
+
+---
+
+## 2026-06-16 — 底部详情面板可拖动收起：镜像安卓（已打 APK）✅
+
+把上一条的可拖动 sheet 同步到安卓（`ui/screens/MapScreen.kt`）：底部 Column 顶部加灰色 handle，
+`detectVerticalDragGestures` 拖动→`Animatable sheetOffset` 配 `Modifier.offset{IntOffset}` 平移；
+`onSizeChanged` 量高算 `maxOffset = 高 - 96dp peek`；松手按过半吸附（`animateTo`）；
+`LaunchedEffect(selectedDeviceId,selectedRallyId)` 选新目标时 `animateTo(0)` 重新展开。
+新增 import：Animatable / detectVerticalDragGestures / offset / pointerInput / onSizeChanged / IntOffset。
+**验证**：`compileDebugKotlin`+`assembleDebug` 通过，新 APK 覆盖 `dist/zhinzen-0.1.0-debug.apk`。
+
+---
+
+## 2026-06-16 — 底部详情面板可拖动收起（web 已部署）✅
+
+用户反馈：点目标后底部窗口太大挡住地图。把固定高度的底部 sheet 改成**可拖动**：抓顶部 handle
+往下滑，收到只剩 `SHEET_PEEK=96px` 的小露头（地图露出来），往上滑回去看详情；松手按过半与否
+吸附到「开/收」。选中新目标时自动重新展开。
+- 实现（`MapScreen.tsx`）：`sheetOffset`(translateY px) + `sheetDrag` ref；handle 上 pointerdown/
+  move/up（`setPointerCapture` + `touchAction:none` 仅加在 handle，**不要**加在 sheet 容器上，否则
+  内容无法滚动）；sheet 容器 `transform: translateY(sheetOffset)` + 非拖动时 `transition`。
+  `useEffect([selectedDeviceId, selectedRallyId]) → setSheetOffset(0)` 重新展开。
+
+**验证**：web typecheck + 构建部署 (zhinzen.web.app)。
+
+---
+
+## 2026-06-16 — 选目标相机改成一段流畅动画（去掉两步停顿，web 已部署 + APK）✅
+
+用户反馈：两步缩放（框两人→停 1.1s→拉近）太生硬、会在「两人范围」停留。改成**一段连续的平滑
+pan+zoom 直接滑到目标**，不再先框两人也不停顿。
+- web `GoogleMapView.tsx`：track effect 去掉 fitBounds + setTimeout，直接 `panTo(target)+setZoom(17)`。
+- android `MapScreen.kt`：`frameThenZoom` → `smoothFocus(camera,lat,lng)`＝单次 `animate(newLatLngZoom,
+  900ms)`；两个 LaunchedEffect 调它。删掉 `delay` / `CameraMoveStartedReason` import（`LatLngBounds`
+  仍被 show-everyone 用，保留）。
+
+**验证**：web typecheck + 构建部署 (zhinzen.web.app)；android `compileDebugKotlin`+`assembleDebug`
+通过，新 APK 覆盖 `dist/zhinzen-0.1.0-debug.apk`。
+注：web 用 `panTo+setZoom`，目标很远时 `panTo` 可能直接跳（API 限制）；家人/情侣场景一般在附近，够用。
+
+---
+
+## 2026-06-16 — 镜像安卓：单击建点 + 选目标两步缩放（已打 APK）✅
+
+把近几轮 web 的行为同步到安卓（`ui/screens/MapScreen.kt`）：
+1. **单击地图建集结点**：`onMapLongClick` → `onMapClick`（marker 点击仍是选中，不会误建）。
+2. **选目标两步缩放**：抽出 `frameThenZoom(camera, self, target)`——先 `animate(newLatLngBounds)`
+   框「自己+目标」，`delay(1100)` 后 `animate(newLatLngZoom(target, 17f))` 拉近；若期间
+   `cameraMoveStartedReason == GESTURE`（用户拖了图）则跳过拉近。selectedDeviceId / selectedRallyId
+   两个 LaunchedEffect 都走这个。新增常量 `TARGET_FOCUS_ZOOM=17f`，import `delay` +
+   `CameraMoveStartedReason` + `CameraPositionState`。
+3. **不弹键盘**：安卓 `RallyNameDialog` 本来就没 autofocus（Compose AlertDialog 默认不抢焦点），无需改。
+4. 半径按钮文字对比度问题是 web 专属（`withAlpha` 对 hex 失效），安卓用 Compose 颜色，不涉及。
+
+**验证**：`compileDebugKotlin` + `assembleDebug` 通过；新 APK 已覆盖 `dist/zhinzen-0.1.0-debug.apk`
+（含此前所有安卓改动：轨迹断档/补速度/调色/卡顿优化/默认不显示自己轨迹）。
+
+---
+
+## 2026-06-16 — web 小修：半径按钮文字 + 不弹键盘 + 单击建点 + 选目标两步缩放（web 已部署）✅
+
+1. **半径按钮选中看不到文字**：根因——`withAlpha` 只能处理 `oklch(...)` 串（靠 `.replace(')',…)`），
+   但集结点用的是 hex `#7c3aed`，没有 `)` → 原样返回**实色紫**；于是选中态=紫底+紫字=看不见。
+   修复：4 处 `withAlpha('#7c3aed', x)` 改成显式 `rgba(124,58,237,x)`（MapScreen 命名弹框、
+   MemberDetailPanel 详情、MemberStrip 集结点条目底色 + 头像光圈）。
+2. **单击建点后别弹键盘**：`RallyNameDialog` 的 name `<input>` 去掉 `autoFocus`（手机一弹框就跳键盘）。
+3. **（接上轮）单击地图建集结点** 已生效（`click` 监听）。
+4. **点目标两步缩放**：`GoogleMapView` track 模式 effect——先 `fitBounds(自己+目标)`，1.1s 后
+   `panTo(目标)+setZoom(17)` 拉近到目标。用户中途拖图→followMode 离开 'track'→effect 清掉定时器，
+   不会强拉。新增常量 `TARGET_FOCUS_ZOOM=17`。
+
+**验证**：web typecheck 通过 + 已构建部署 (zhinzen.web.app)。
+还剩：以上 #2/#4 仅 web；android 未镜像、也未打 APK（如需我再同步并出包）。
+
+---
+
+## 2026-06-16 — 默认不显示自己轨迹 + web 加「集结点」按钮（web 已部署 / android 已编译）✅
+
+1. **默认不显示自己轨迹，点头像才显示**：原来没选任何人时默认显示自己轨迹。改成「只显示
+   被显式选中成员的轨迹」——点自己头像=选中自己→显示自己轨迹；什么都没选=无轨迹（地图更干净）。
+   - web `MapScreen.tsx`：`trackDeviceId = selectedDeviceId`（去掉 `?? deviceId`）。
+   - android `AppViewModel.kt`：`selectMember` 里 target 为 null 时清空 trackPoints；周期 grow 只在
+     `selectedDeviceId != null` 时拉。
+2. **web 集结点其实「装了」但创建入口在 mobile 上点不出来**：web 原来只监听 `contextmenu`（桌面右键 /
+   手机长按不触发），所以手机网页无法新建集结点（数据路径 `rallyPoints/{roomId}` 两端一致，已建的能同步显示）。
+   **最终方案（按用户要求）：单击地图空白处即创建集结点**——`GoogleMapView` 地图监听从 `contextmenu`
+   改为 `click`，点空白处→落待命点→原命名/半径弹框；点 marker 仍是选中（marker click 不冒泡到 map）。
+   桌面左键同样可建。（中途加过的「📍集结点 FAB + addRallySignal」已回退，`Icon.rally` 图标也已移除。）
+
+**验证**：web typecheck 通过 + 已构建部署 (zhinzen.web.app)；android `compileDebugKotlin` 通过。
+还剩：android 未打 APK。
+
+---
+
+## 2026-06-16 — 24h 轨迹渲染卡顿优化：增量拉取 + polyline 复用 + 速度平滑（web 已部署 / android 已编译）✅
+
+用户反馈 24h 轨迹仍卡顿。根因：web/android 都**每 10–15s 重新下载整段 24h 点**（几千个），
+重新解析 + 整体重建覆盖物 → 周期性卡顿。三处优化：
+1. **增量拉取**（最大头）：首屏全量拉 24h，之后每次只拉「比已持有最新点更新」的点并追加，
+   再裁掉超 24h 的旧点；没有新点就不 setState/不重建。
+   - web：`MapScreen.tsx` 用 `lastTrackAtRef` + 闭包 `held` 维护；
+   - android：VM 加 `trackTargetId`/`lastTrackCreatedAt`，`fetchTrack` 切目标才全量、否则增量。
+2. **polyline 复用**（web）：`GoogleMapView.syncTrackSegments` 不再每次 clear+new，而是
+   `setOptions({path,strokeColor})` 原地复用已有 Polyline，多删少补。覆盖物 churn 是渲染瓶颈。
+3. **速度中值平滑**（web+android 同步）：上色前对每段速度做 median-of-3，去掉单点尖峰，
+   减少颜色桶来回跳变产生的大量碎 polyline（也更好看）。`geo-utils` `smoothSpeeds` /
+   `TrackSimplify.smoothSpeeds`。
+
+**验证**：`npm run typecheck` 全过；android `compileDebugKotlin` 通过；**web 已构建+部署 (zhinzen.web.app)**。
+还剩：android 未打 APK。若仍卡，下一步可考虑改 RTDB `onChildAdded` 实时订阅彻底去轮询。
+
+---
+
+## 2026-06-16 — 轨迹测速：摩托车不再大片红色（补速度 + 调色带，web+app）✅
+
+用户反馈：骑摩托车但轨迹很多地方是红色。根因两点：
+1. **存的 `speed` 是 GPS 多普勒速度，经常缺失=0**（web `coords.speed` 常为 null→0；android
+   `loc.hasSpeed()` 常 false→0）。speed=0 一律渲染红色，与是否在动无关。
+2. **红色带太宽**：旧色带 0–15km/h 全红，城里慢骑/堵车（10–15）也红。
+
+**改法**：
+- **缺速补算**：上色前，若该点 GPS speed=0/缺失，则用「与前一点的距离 ÷ 时间」算地速来补
+  （断档已按 90s 切 run，dt 有界，补算可靠）。web `appendRunSegments` 加 `effectiveSpeed` +
+  给点打 `_i` 索引以便简化后回查速度；android 同名 `effectiveSpeed`（用 `Geo.distanceMeters`）。
+- **新色带**（web/android 同步）：0–5 红（停/走）→ 18 黄（慢骑/堵车）→ 32 绿（正常骑行/开车）。
+  文件：`packages/geo-utils/src/index.ts` `TRACK_STOPS`；`ui/screens/MapScreen.kt` `colorForSpeed`。
+
+**验证**：`npm run typecheck` 全过；android `compileDebugKotlin` 通过。**web 已部署 (zhinzen.web.app)**；android 未打 APK。
+注：补算用的是两点直线地速，弯路会略低估；正常骑行仍落在黄/绿。阈值想再调直接改这两处常量。
+
+---
+
+## 2026-06-16 — 轨迹：关闭重开不再拉一条大直线 + 确认自他轨迹着色一致（web+app）✅
+
+用户两个问题：
+1. **自己轨迹 vs 别人轨迹的着色/速度区分是否一致？** → 是，完全一致。一次只渲染一条
+   轨迹（`trackDeviceId = 选中成员 ?: 自己`），web/android 都走同一套
+   `buildTrackSegments`/`TrackSimplify.buildSegments` + 同一速度色带（0–15 红 / 28 黄 / 40+ 绿）。
+   自己/别人没有任何特判；唯一区别是「图钉/头像」颜色（自己蓝、别人按状态），轨迹线本身只按速度上色。
+2. **关闭再打开时，轨迹从上个点直接拉一条大直线到现在点** → 已修。
+
+**改动**：按「时间间隔」把轨迹切成多段 run——相邻两点时间差 > `90s`（远高于 ~20s 心跳）就
+   断开，不连线。每个 run 各自做 RDP 简化 + 速度上色，run 之间绝不合并（避免同色尾首又连起来）。
+- web：`packages/geo-utils/src/constants.ts` 加 `DEFAULT_TRACK_GAP_BREAK_MS=90000`；
+  `packages/geo-utils/src/index.ts` `buildTrackSegments` 加 `createdAt` 泛型约束 + `gapMs` 参数，
+  按 run 切分（新增 `appendRunSegments`）。
+- android：`map/TrackSimplify.kt` 加 `GAP_BREAK_MS=90000L` + 同样按 run 切分（新增 `appendRunSegments`）。
+
+**验证**：`npm run typecheck` 全过；android `compileDebugKotlin` 通过。**web 已部署 (zhinzen.web.app)**；android 未打 APK。
+
+---
+
 ## 2026-06-09 — 集结点可单独设半径 + 点击显示范围圈（web+app，已部署）✅
 
 - `RallyPoint` 增 `radius`(默认 100m);RTDB 规则加 radius 校验(20–2000m,已部署)。

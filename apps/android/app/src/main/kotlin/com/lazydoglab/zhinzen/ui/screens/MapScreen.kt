@@ -7,10 +7,13 @@ import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -23,6 +26,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -61,10 +65,16 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
@@ -76,6 +86,8 @@ import com.google.android.gms.maps.model.BitmapDescriptorFactory
 import com.google.android.gms.maps.model.CameraPosition
 import com.google.android.gms.maps.model.LatLng
 import com.google.android.gms.maps.model.LatLngBounds
+import com.google.maps.android.compose.CameraMoveStartedReason
+import com.google.maps.android.compose.CameraPositionState
 import com.google.maps.android.compose.Circle
 import com.google.maps.android.compose.GoogleMap
 import com.google.maps.android.compose.MapProperties
@@ -86,6 +98,7 @@ import com.google.maps.android.compose.rememberCameraPositionState
 import com.google.maps.android.compose.rememberMarkerState
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalDensity
+import com.lazydoglab.zhinzen.FollowTarget
 import com.lazydoglab.zhinzen.R
 import com.lazydoglab.zhinzen.data.Geo
 import com.lazydoglab.zhinzen.data.LiveLocation
@@ -109,6 +122,11 @@ fun MapScreen(
     ownLocation: LiveLocation?,
     selectedDeviceId: String?,
     deviceHeading: Float?,
+    /** Heading the map points at: GPS course while moving, compass otherwise. */
+    followHeading: Float?,
+    /** True when [followHeading] is a GPS course (sparse) rather than the compass. */
+    headingFromGps: Boolean,
+    needsCompassCalibration: Boolean,
     sharing: Boolean,
     trackPoints: List<TrackPoint>,
     headingUp: Boolean,
@@ -121,6 +139,17 @@ fun MapScreen(
     rallyPoints: List<RallyPoint>,
     selectedRallyId: String?,
     pendingRally: Pair<Double, Double>?,
+    // Follow mode (design.md §5.10).
+    followTarget: FollowTarget?,
+    followPaused: Boolean,
+    followPoint: Pair<Double, Double>?,
+    followName: String?,
+    /** `updatedAt` of the followed fix, so a stale target shows its age. */
+    followUpdatedAt: Long?,
+    onStartFollow: (FollowTarget) -> Unit,
+    onStopFollow: () -> Unit,
+    onPauseFollow: () -> Unit,
+    onResumeFollow: () -> Unit,
     onLeave: () -> Unit,
     onPermissionGranted: () -> Unit,
     onSelectMember: (String?) -> Unit,
@@ -214,22 +243,125 @@ fun MapScreen(
         )
     }
 
-    // Heading-up: rotate the map to follow the device compass; reset to north off.
-    // Animate (tween) between compass samples so the rotation is smooth, not steppy.
-    LaunchedEffect(headingUp, deviceHeading) {
-        if (headingUp && deviceHeading != null) {
-            val pos = cameraPositionState.position
-            runCatching {
-                cameraPositionState.animate(
-                    CameraUpdateFactory.newCameraPosition(
-                        CameraPosition.Builder()
-                            .target(pos.target).zoom(pos.zoom).tilt(pos.tilt).bearing(deviceHeading).build(),
-                    ),
-                    durationMs = 220,
-                )
+    // ---- Follow mode camera (design.md §5.10) ------------------------------
+    // You are the anchor: the camera centers on *you*, parked at a fixed point below
+    // the middle of the screen, and the zoom is sized so the target stays inside the
+    // visible radius. `newLatLngBounds` is deliberately not used — it fits a
+    // north-aligned box (wrong once the map is rotated) and resets the bearing.
+    var mapSizePx by remember { mutableStateOf(IntSize.Zero) }
+    val density = LocalDensity.current
+    val followLat = followPoint?.first
+    val followLng = followPoint?.second
+    val followActive = followTarget != null && !followPaused &&
+        followLat != null && followLng != null && selfLocation != null
+    // Desired camera, read by the frame loop below.
+    val desired = remember { DesiredCam() }
+
+    LaunchedEffect(followActive, selfLocation?.lat, selfLocation?.lng, followLat, followLng, mapSizePx) {
+        if (!followActive) {
+            desired.valid = false
+            return@LaunchedEffect
+        }
+        val me = selfLocation ?: return@LaunchedEffect
+        val tLat = followLat ?: return@LaunchedEffect
+        val tLng = followLng ?: return@LaunchedEffect
+        if (mapSizePx.width == 0 || mapSizePx.height == 0) return@LaunchedEffect
+
+        val radiusPx = with(density) { anchorRadiusPx(mapSizePx, this) }
+        val needM = Geo.distanceMeters(me.lat, me.lng, tLat, tLng) + FOLLOW_MARGIN_M
+        var zoom = Geo.zoomForMeters(me.lat, needM, radiusPx)
+            .coerceIn(FOLLOW_MIN_ZOOM, FOLLOW_MAX_ZOOM)
+            .toFloat()
+        // Dead zone: the distance between you jitters constantly, and reacting to
+        // every wobble makes the map "breathe".
+        if (desired.valid && kotlin.math.abs(zoom - desired.zoom) < FOLLOW_ZOOM_EPSILON) {
+            zoom = desired.zoom
+        }
+        desired.lat = me.lat
+        desired.lng = me.lng
+        desired.zoom = zoom
+        desired.valid = true
+    }
+
+    // Single per-frame camera driver. Rotation and framing cannot be two competing
+    // `animate()` calls (each cancels the other, which is what made this feel mushy):
+    // one loop eases target + zoom + bearing and writes the camera directly. The
+    // center offset must be recomputed from the *current* bearing every frame —
+    // that is what keeps you pinned to the anchor while the world turns around you,
+    // instead of you orbiting the screen center.
+    LaunchedEffect(headingUp, followActive, mapSizePx) {
+        if (!headingUp && !followActive) return@LaunchedEffect
+        val offsetPx = with(density) { anchorOffsetPx(mapSizePx, this) }
+        var lastNanos = 0L
+        var bearing = cameraPositionState.position.bearing
+        var zoom = cameraPositionState.position.zoom
+        var lat = Double.NaN
+        var lng = Double.NaN
+        while (true) {
+            withFrameNanos { now ->
+                val dt = if (lastNanos == 0L) 16.0 else ((now - lastNanos) / 1_000_000.0).coerceIn(1.0, 120.0)
+                lastNanos = now
+                // Never fight the user's own gesture.
+                val gesturing = cameraPositionState.isMoving &&
+                    cameraPositionState.cameraMoveStartedReason == CameraMoveStartedReason.GESTURE
+                if (!gesturing) {
+                    val headingTarget = followHeading
+                    if (headingUp && headingTarget != null) {
+                        val tau = if (headingFromGps) FOLLOW_GPS_HEADING_TAU_MS else FOLLOW_HEADING_TAU_MS
+                        val delta = ((headingTarget - bearing + 540f) % 360f) - 180f
+                        bearing =
+                            if (kotlin.math.abs(delta) < 0.05f) {
+                                headingTarget
+                            } else {
+                                ((bearing + delta * (1f - kotlin.math.exp((-dt / tau).toFloat())) + 360f) % 360f)
+                            }
+                    }
+                    if (desired.valid) {
+                        val k = 1.0 - kotlin.math.exp(-dt / FOLLOW_CENTER_TAU_MS)
+                        if (lat.isNaN()) {
+                            lat = desired.lat
+                            lng = desired.lng
+                            zoom = desired.zoom
+                        } else {
+                            lat += (desired.lat - lat) * k
+                            lng += (desired.lng - lng) * k
+                            zoom += ((desired.zoom - zoom) * k).toFloat()
+                        }
+                        // You sit below center, so the camera center is that many
+                        // pixels *up-screen* from you — up-screen is the bearing.
+                        val center =
+                            if (offsetPx == 0f) {
+                                LatLng(lat, lng)
+                            } else {
+                                val meters = offsetPx * Geo.metersPerPixel(lat, zoom.toDouble())
+                                val (cLat, cLng) = Geo.destination(lat, lng, bearing.toDouble(), meters)
+                                LatLng(cLat, cLng)
+                            }
+                        cameraPositionState.position = CameraPosition.builder()
+                            .target(center).zoom(zoom).tilt(cameraPositionState.position.tilt)
+                            .bearing(bearing).build()
+                    } else {
+                        lat = Double.NaN
+                        if (headingUp) {
+                            val pos = cameraPositionState.position
+                            cameraPositionState.position = CameraPosition.builder()
+                                .target(pos.target).zoom(pos.zoom).tilt(pos.tilt).bearing(bearing).build()
+                        }
+                    }
+                }
             }
         }
     }
+
+    // A gesture hands the camera back to the user without ending the session.
+    LaunchedEffect(cameraPositionState.isMoving) {
+        if (cameraPositionState.isMoving &&
+            cameraPositionState.cameraMoveStartedReason == CameraMoveStartedReason.GESTURE
+        ) {
+            onPauseFollow()
+        }
+    }
+
     LaunchedEffect(headingUp) {
         if (!headingUp && cameraPositionState.position.bearing != 0f) {
             val pos = cameraPositionState.position
@@ -244,29 +376,22 @@ fun MapScreen(
         }
     }
 
-    // Track mode: when an other member is selected, frame self + target once.
+    // On selecting a member — including your own avatar — glide to them in one smooth
+    // pan+zoom at a consistent zoom (no hard stop framing both first; that felt stiff).
     LaunchedEffect(selectedDeviceId) {
-        val target = selected?.takeIf { !it.isSelf }?.location ?: return@LaunchedEffect
-        val self = selfLocation ?: return@LaunchedEffect
-        val bounds = LatLngBounds.builder()
-            .include(LatLng(self.lat, self.lng))
-            .include(LatLng(target.lat, target.lng))
-            .build()
-        runCatching { cameraPositionState.animate(CameraUpdateFactory.newLatLngBounds(bounds, 200)) }
+        val target = selected?.location ?: return@LaunchedEffect
+        smoothFocus(cameraPositionState, target.lat, target.lng)
     }
 
-    // Frame self + the selected rally point, like selecting a member.
+    // Same single smooth glide for the selected rally point.
     LaunchedEffect(selectedRallyId) {
         val rally = rallyPoints.firstOrNull { it.id == selectedRallyId } ?: return@LaunchedEffect
-        val self = selfLocation ?: return@LaunchedEffect
-        val bounds = LatLngBounds.builder()
-            .include(LatLng(self.lat, self.lng))
-            .include(LatLng(rally.lat, rally.lng))
-            .build()
-        runCatching { cameraPositionState.animate(CameraUpdateFactory.newLatLngBounds(bounds, 200)) }
+        smoothFocus(cameraPositionState, rally.lat, rally.lng)
     }
 
-    Box(modifier = modifier.fillMaxSize()) {
+    Box(
+        modifier = modifier.fillMaxSize().onSizeChanged { mapSizePx = it },
+    ) {
         GoogleMap(
             modifier = Modifier.fillMaxSize(),
             cameraPositionState = cameraPositionState,
@@ -282,6 +407,9 @@ fun MapScreen(
             ),
             // Keep the Google logo + controls inside the system bars (edge-to-edge).
             contentPadding = WindowInsets.systemBars.asPaddingValues(),
+            // Long-press the empty map to drop a rally point (single tap is too easy to
+            // trigger by accident on Android; web keeps single-tap since long-press
+            // doesn't fire there).
             onMapLongClick = { onLongPress(it.latitude, it.longitude) },
         ) {
             rallyPoints.forEach { rp ->
@@ -312,11 +440,16 @@ fun MapScreen(
                     }
                 }
             }
-            // Track: simplify by zoom + merge same-color runs into one polyline each
-            // (keyed on integer zoom so it only recomputes on real zoom steps).
+            // Track: simplify by zoom + merge same-color runs into one polyline each.
+            // Only rebuild once the camera settles (not on every zoom step mid-animation,
+            // which made zooming janky) — the existing polylines just transform meanwhile.
             val zoomKey = cameraPositionState.position.zoom.roundToInt()
-            val trackSegments = remember(trackPoints.size, zoomKey) {
-                TrackSimplify.buildSegments(trackPoints, zoomKey.toFloat())
+            var settledTrackKey by remember { mutableStateOf(trackPoints.size to zoomKey) }
+            LaunchedEffect(cameraPositionState.isMoving, trackPoints.size, zoomKey) {
+                if (!cameraPositionState.isMoving) settledTrackKey = trackPoints.size to zoomKey
+            }
+            val trackSegments = remember(settledTrackKey) {
+                TrackSimplify.buildSegments(trackPoints, settledTrackKey.second.toFloat())
             }
             trackSegments.forEachIndexed { i, seg ->
                 key(i) {
@@ -401,6 +534,125 @@ fun MapScreen(
             }
         }
 
+        // Follow-mode bar: one glanceable line (name · distance · arrow) while riding.
+        if (followTarget != null) {
+            val fLat = followPoint?.first
+            val fLng = followPoint?.second
+            val followDistance =
+                if (selfLocation != null && fLat != null && fLng != null) {
+                    Geo.formatDistance(Geo.distanceMeters(selfLocation.lat, selfLocation.lng, fLat, fLng))
+                } else {
+                    "—"
+                }
+            // The map is rotated heading-up, so screen-up is our heading and the arrow
+            // can point straight at the target.
+            val followRelative: Float? =
+                if (selfLocation != null && fLat != null && fLng != null) {
+                    val bearing = Geo.bearingDegrees(selfLocation.lat, selfLocation.lng, fLat, fLng).toFloat()
+                    (bearing - cameraPositionState.position.bearing + 360f) % 360f
+                } else {
+                    null
+                }
+            Row(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .statusBarsPadding()
+                    .padding(top = 64.dp, start = 16.dp, end = 16.dp)
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(15.dp))
+                    .background(if (followPaused) Color(0xF2FFFFFF) else ZzColor.Self)
+                    .padding(start = 14.dp, end = 6.dp, top = 8.dp, bottom = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                val onBar = if (followPaused) ZzColor.Ink else Color.White
+                Text(
+                    text = "◎ " + (followName?.ifBlank { null } ?: stringResource(R.string.you)),
+                    color = onBar,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                )
+                Text(text = followDistance, color = onBar, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                if (followRelative != null) FollowArrow(followRelative, onBar)
+                // Signal lost → say how old the position we're parked on is.
+                if (followUpdatedAt != null && System.currentTimeMillis() - followUpdatedAt > 60_000L) {
+                    Text(text = formatAgo(followUpdatedAt), color = onBar, fontSize = 12.sp)
+                }
+                Box(modifier = Modifier.weight(1f))
+                Text(
+                    text = "✕",
+                    color = onBar,
+                    fontSize = 18.sp,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(10.dp))
+                        .clickable { onStopFollow() }
+                        .padding(horizontal = 12.dp, vertical = 4.dp),
+                )
+            }
+            if (followPaused) {
+                Text(
+                    text = stringResource(R.string.follow_resume, followName ?: ""),
+                    color = Color.White,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .statusBarsPadding()
+                        .padding(top = 120.dp)
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(ZzColor.Self)
+                        .clickable { onResumeFollow() }
+                        .padding(horizontal = 16.dp, vertical = 10.dp),
+                )
+            }
+        }
+
+        // Compass calibration prompt: shows while the compass is active but accuracy is
+        // low. Calibration itself is OS-driven — the user waves a figure-8 and the
+        // magnetometer recalibrates, then accuracy recovers and this hides. ✕ dismisses
+        // until it drops again.
+        var calibrationDismissed by remember { mutableStateOf(false) }
+        LaunchedEffect(needsCompassCalibration) {
+            if (!needsCompassCalibration) calibrationDismissed = false
+        }
+        if (needsCompassCalibration && !calibrationDismissed) {
+            Row(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .statusBarsPadding()
+                    // Sits below the follow bar (and its resume pill) when following.
+                    .padding(
+                        top = if (followTarget == null) 64.dp else if (followPaused) 176.dp else 120.dp,
+                        start = 16.dp,
+                        end = 16.dp,
+                    )
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Color(0xF2FFF4D6))
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text(text = "🧭", fontSize = 18.sp)
+                Text(
+                    text = stringResource(R.string.compass_calibrate),
+                    color = ZzColor.Ink,
+                    fontSize = 13.sp,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    text = "✕",
+                    color = ZzColor.InkFaint,
+                    fontSize = 16.sp,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable { calibrationDismissed = true }
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                )
+            }
+        }
+
         if (!granted) {
             Column(
                 modifier = Modifier
@@ -439,6 +691,8 @@ fun MapScreen(
                 icon = FabIcon.Recenter,
                 onClick = {
                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    // Taking the camera pauses a follow session rather than ending it.
+                    onPauseFollow()
                     val self = selfLocation
                     if (self != null) {
                         scope.launch {
@@ -456,6 +710,7 @@ fun MapScreen(
                 icon = FabIcon.FitAll,
                 onClick = {
                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onPauseFollow()
                     val pins = members.mapNotNull { it.location }
                     if (pins.isNotEmpty()) {
                         val builder = LatLngBounds.builder()
@@ -473,49 +728,149 @@ fun MapScreen(
         }
 
         // bottom sheet: member strip or selected member detail
-        Column(
+        // Draggable bottom sheet: grab the handle and slide it down to a small peek so
+        // it stops covering the map; slide back up to read the detail. Selecting a new
+        // target reopens it.
+        val peekPx = with(LocalDensity.current) { 52.dp.toPx() }
+        val sheetOffset = remember { Animatable(0f) }
+        var sheetHeightPx by remember { mutableStateOf(0) }
+        val maxOffset = (sheetHeightPx - peekPx).coerceAtLeast(0f)
+        LaunchedEffect(selectedDeviceId, selectedRallyId) { sheetOffset.animateTo(0f) }
+        val detailOpen = selected != null || selectedRallyId != null
+        Box(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp))
-                .background(ZzColor.Surface)
-                .navigationBarsPadding()
-                .padding(horizontal = 18.dp, vertical = 14.dp),
+                .offset { IntOffset(0, sheetOffset.value.roundToInt()) }
+                .onSizeChanged { sheetHeightPx = it.height },
         ) {
-            val selectedRally = rallyPoints.firstOrNull { it.id == selectedRallyId }
-            val selfId = members.firstOrNull { it.isSelf }?.member?.deviceId
-            if (selected != null) {
-                MemberDetail(
-                    member = selected,
-                    selfLocation = selfLocation,
-                    deviceHeading = deviceHeading,
-                    estimate = nearbyEstimates[selected.member.deviceId],
-                    uwb = nearbyUwb,
-                    nearbyScanning = nearbyScanning,
-                    canKick = isOwner && !selected.isSelf,
-                    onKick = onKick,
-                    onPoke = { text -> onPoke(selected.member.deviceId, text) },
-                    onClose = { onSelectMember(null) },
-                    onRename = onRename,
-                    onLeave = { showLeaveConfirm = true },
-                )
-            } else if (selectedRally != null) {
-                RallyDetail(
-                    point = selectedRally,
-                    selfLocation = selfLocation,
-                    deviceHeading = deviceHeading,
-                    canEdit = selectedRally.createdByDeviceId == selfId || isOwner,
-                    onSetRadius = { r -> onSetRallyRadius(selectedRally.id, r) },
-                    onDelete = { onDeleteRally(selectedRally.id) },
-                    onClose = { onSelectRally(null) },
-                )
-            } else {
-                MemberStrip(
-                    members = members,
-                    nearbyIds = nearbyEstimates.keys,
-                    rallyPoints = rallyPoints,
-                    onSelect = onSelectMember,
-                    onSelectRally = onSelectRally,
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp))
+                    .background(ZzColor.Surface)
+                    .navigationBarsPadding()
+                    .padding(horizontal = 18.dp, vertical = 14.dp),
+            ) {
+                // Grab handle — drag down to peek, up to open; snaps to the nearer end.
+                // When peeked, a single tap on it expands the sheet back. (For a detail,
+                // the taller strip overlay below also drags/expands from the name area.)
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                        ) {
+                            if (sheetOffset.value > 8f) scope.launch { sheetOffset.animateTo(0f) }
+                        }
+                        .pointerInput(maxOffset) {
+                            detectVerticalDragGestures(
+                                onDragEnd = {
+                                    val target = if (sheetOffset.value > maxOffset / 2f) maxOffset else 0f
+                                    scope.launch { sheetOffset.animateTo(target) }
+                                },
+                            ) { change, dragAmount ->
+                                change.consume()
+                                scope.launch {
+                                    sheetOffset.snapTo((sheetOffset.value + dragAmount).coerceIn(0f, maxOffset))
+                                }
+                            }
+                        }
+                        .padding(bottom = 10.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .width(36.dp)
+                            .height(4.dp)
+                            .clip(RoundedCornerShape(2.dp))
+                            .background(ZzColor.InkFaint.copy(alpha = 0.3f)),
+                    )
+                }
+                val selectedRally = rallyPoints.firstOrNull { it.id == selectedRallyId }
+                val selfId = members.firstOrNull { it.isSelf }?.member?.deviceId
+                if (selected != null) {
+                    MemberDetail(
+                        member = selected,
+                        selfLocation = selfLocation,
+                        deviceHeading = deviceHeading,
+                        estimate = nearbyEstimates[selected.member.deviceId],
+                        uwb = nearbyUwb,
+                        nearbyScanning = nearbyScanning,
+                        canKick = isOwner && !selected.isSelf,
+                        following = followTarget?.let { !it.isRally && it.id == selected.member.deviceId } == true,
+                        onToggleFollow = {
+                            val t = followTarget
+                            if (t != null && !t.isRally && t.id == selected.member.deviceId) {
+                                onStopFollow()
+                            } else {
+                                onStartFollow(FollowTarget(isRally = false, id = selected.member.deviceId))
+                            }
+                        },
+                        onKick = onKick,
+                        onPoke = { text -> onPoke(selected.member.deviceId, text) },
+                        onClose = { onSelectMember(null) },
+                        onRename = onRename,
+                        onLeave = { showLeaveConfirm = true },
+                    )
+                } else if (selectedRally != null) {
+                    RallyDetail(
+                        point = selectedRally,
+                        selfLocation = selfLocation,
+                        deviceHeading = deviceHeading,
+                        canEdit = selectedRally.createdByDeviceId == selfId || isOwner,
+                        following = followTarget?.let { it.isRally && it.id == selectedRally.id } == true,
+                        onToggleFollow = {
+                            val t = followTarget
+                            if (t != null && t.isRally && t.id == selectedRally.id) {
+                                onStopFollow()
+                            } else {
+                                onStartFollow(FollowTarget(isRally = true, id = selectedRally.id))
+                            }
+                        },
+                        onSetRadius = { r -> onSetRallyRadius(selectedRally.id, r) },
+                        onDelete = { onDeleteRally(selectedRally.id) },
+                        onClose = { onSelectRally(null) },
+                    )
+                } else {
+                    MemberStrip(
+                        members = members,
+                        nearbyIds = nearbyEstimates.keys,
+                        rallyPoints = rallyPoints,
+                        onSelect = onSelectMember,
+                        onSelectRally = onSelectRally,
+                    )
+                }
+            }
+            // Taller drag/tap strip over the top (handle + name) when a detail is open;
+            // the close-button corner (end) is left free. Drag to peek, tap to expand.
+            if (detailOpen) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .fillMaxWidth()
+                        .height(66.dp)
+                        .padding(end = 54.dp)
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                        ) {
+                            if (sheetOffset.value > 8f) scope.launch { sheetOffset.animateTo(0f) }
+                        }
+                        .pointerInput(maxOffset) {
+                            detectVerticalDragGestures(
+                                onDragEnd = {
+                                    val target = if (sheetOffset.value > maxOffset / 2f) maxOffset else 0f
+                                    scope.launch { sheetOffset.animateTo(target) }
+                                },
+                            ) { change, dragAmount ->
+                                change.consume()
+                                scope.launch {
+                                    sheetOffset.snapTo((sheetOffset.value + dragAmount).coerceIn(0f, maxOffset))
+                                }
+                            }
+                        },
                 )
             }
         }
@@ -609,6 +964,8 @@ private fun MemberDetail(
     uwb: UwbResult?,
     nearbyScanning: Boolean,
     canKick: Boolean,
+    following: Boolean,
+    onToggleFollow: () -> Unit,
     onKick: (String) -> Unit,
     onPoke: (String) -> Unit,
     onClose: () -> Unit,
@@ -645,7 +1002,31 @@ private fun MemberDetail(
     if (member.isSelf) {
         SelfEditor(member, onRename, onLeave)
     } else {
+        // Follow mode's single entry point, so tapping an avatar keeps its cheap
+        // "select and look" meaning (design.md §5.10).
+        FollowButton(following = following, onToggle = onToggleFollow, accent = ZzColor.Self)
         OtherDetail(member, selfLocation, deviceHeading, estimate, uwb, nearbyScanning, canKick, onKick, onPoke)
+    }
+}
+
+/** Primary "Follow / Stop following" button shown at the top of a target's detail. */
+@Composable
+private fun FollowButton(following: Boolean, onToggle: () -> Unit, accent: Color) {
+    if (following) {
+        OutlinedButton(
+            onClick = onToggle,
+            modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+        ) {
+            Text(text = "◎ " + stringResource(R.string.follow_stop), color = accent, fontWeight = FontWeight.Bold)
+        }
+    } else {
+        Button(
+            onClick = onToggle,
+            colors = ButtonDefaults.buttonColors(containerColor = accent),
+            modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+        ) {
+            Text(text = "◎ " + stringResource(R.string.follow), fontWeight = FontWeight.Bold)
+        }
     }
 }
 
@@ -687,6 +1068,8 @@ private fun RallyDetail(
     selfLocation: LiveLocation?,
     deviceHeading: Float?,
     canEdit: Boolean,
+    following: Boolean,
+    onToggleFollow: () -> Unit,
     onSetRadius: (Int) -> Unit,
     onDelete: () -> Unit,
     onClose: () -> Unit,
@@ -716,6 +1099,7 @@ private fun RallyDetail(
                 .padding(horizontal = 12.dp, vertical = 6.dp),
         )
     }
+    FollowButton(following = following, onToggle = onToggleFollow, accent = ZzColor.Target)
     Row(
         modifier = Modifier.padding(top = 12.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -1397,18 +1781,102 @@ private fun DirectionPointer(relative: Float?) {
     }
 }
 
+/** Small arrow for the follow bar; unwrapped angle so it never spins the long way. */
+@Composable
+private fun FollowArrow(relative: Float, color: Color) {
+    var continuous by remember { mutableStateOf(relative) }
+    LaunchedEffect(relative) {
+        continuous += ((relative - (continuous % 360f) + 540f) % 360f) - 180f
+    }
+    val angle by animateFloatAsState(targetValue = continuous, label = "followArrow")
+    Canvas(modifier = Modifier.size(22.dp).rotate(angle)) {
+        val w = size.width
+        val h = size.height
+        val path = Path().apply {
+            moveTo(w / 2f, 0f)
+            lineTo(w * 0.82f, h)
+            lineTo(w / 2f, h * 0.66f)
+            lineTo(w * 0.18f, h)
+            close()
+        }
+        drawPath(path, color = color)
+    }
+}
+
+/** Street-level zoom the camera glides to when a target is selected. */
+private const val TARGET_FOCUS_ZOOM = 17f
+
+/*
+ * Follow mode tuning (design.md §5.10) — kept in step with
+ * packages/geo-utils/src/constants.ts so both platforms feel the same.
+ */
+/** Viewport insets follow mode keeps clear: top bars / FAB column / sheet peek. */
+private val FOLLOW_PAD_TOP = 120.dp
+private val FOLLOW_PAD_BOTTOM = 150.dp
+private val FOLLOW_PAD_SIDE = 24.dp
+/** Ground margin past the target so its pin never touches the edge. */
+private const val FOLLOW_MARGIN_M = 40.0
+private const val FOLLOW_MIN_ZOOM = 13.0
+/** Riding side by side should not slam the camera to street level. */
+private const val FOLLOW_MAX_ZOOM = 17.5
+private const val FOLLOW_ZOOM_EPSILON = 0.35f
+/** Where you sit in the usable viewport (0 top → 1 bottom): below the middle. */
+private const val FOLLOW_ANCHOR_FRAC = 0.62f
+private const val FOLLOW_CENTER_TAU_MS = 220.0
+private const val FOLLOW_HEADING_TAU_MS = 90.0
+/** GPS course arrives once per position packet, so it needs much more smoothing. */
+private const val FOLLOW_GPS_HEADING_TAU_MS = 450.0
+
+/** How far below the viewport center your anchor sits, in pixels. */
+private fun anchorOffsetPx(size: IntSize, density: Density): Float {
+    val padTop = with(density) { FOLLOW_PAD_TOP.toPx() }
+    val padBottom = with(density) { FOLLOW_PAD_BOTTOM.toPx() }
+    val usableH = (size.height - padTop - padBottom).coerceAtLeast(120f)
+    return padTop + FOLLOW_ANCHOR_FRAC * usableH - size.height / 2f
+}
+
 /**
- * Track segment color by speed. Input is m/s; thresholds are in km/h:
- * 0–15 red, ~28 yellow, 40+ green, with a smooth gradient between (mirrors web).
+ * Visible radius around the anchor, in pixels: the distance to the nearest usable
+ * edge. Sizing the zoom by this keeps the target on screen whichever way it lies.
+ */
+private fun anchorRadiusPx(size: IntSize, density: Density): Int {
+    val padTop = with(density) { FOLLOW_PAD_TOP.toPx() }
+    val padBottom = with(density) { FOLLOW_PAD_BOTTOM.toPx() }
+    val padSide = with(density) { FOLLOW_PAD_SIDE.toPx() }
+    val usableH = (size.height - padTop - padBottom).coerceAtLeast(120f)
+    val usableW = (size.width - 2 * padSide).coerceAtLeast(120f)
+    val above = FOLLOW_ANCHOR_FRAC * usableH
+    return minOf(usableW / 2f, above, usableH - above).coerceAtLeast(80f).toInt()
+}
+
+/** Desired follow camera, written by the sizing effect and read by the frame loop. */
+private class DesiredCam {
+    var valid: Boolean = false
+    var lat: Double = 0.0
+    var lng: Double = 0.0
+    var zoom: Float = 0f
+}
+
+/** One smooth eased pan+zoom to the target (mirrors web). */
+private suspend fun smoothFocus(camera: CameraPositionState, lat: Double, lng: Double) {
+    runCatching {
+        camera.animate(CameraUpdateFactory.newLatLngZoom(LatLng(lat, lng), TARGET_FOCUS_ZOOM), 900)
+    }
+}
+
+/**
+ * Track segment color by speed. Input is m/s; thresholds are in km/h: only
+ * stopped/walking is red, slow riding warms to yellow, normal riding/driving is
+ * green, with a smooth gradient between (mirrors web @zhinzen/geo-utils).
  */
 private fun colorForSpeed(speedMps: Double): Color {
     val kmh = (speedMps * 3.6).coerceAtLeast(0.0)
     val stops =
         listOf(
-            0.0 to Triple(220, 38, 38), // red
-            15.0 to Triple(220, 38, 38), // still red at the top of the slow band
-            28.0 to Triple(234, 179, 8), // yellow (middle of 16–39)
-            40.0 to Triple(34, 197, 94), // green from 40 km/h
+            0.0 to Triple(220, 38, 38), // red — stopped / walking
+            5.0 to Triple(220, 38, 38),
+            18.0 to Triple(234, 179, 8), // yellow — slow riding / heavy traffic
+            32.0 to Triple(34, 197, 94), // green — riding / driving
             200.0 to Triple(34, 197, 94),
         )
     for (i in 1 until stops.size) {

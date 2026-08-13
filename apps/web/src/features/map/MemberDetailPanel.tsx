@@ -21,6 +21,9 @@ interface MemberDetailPanelProps {
   onKick?: (deviceId: string) => void;
   /** Send a poke / quick message to this member. */
   onPoke?: (text: string) => void;
+  /** Follow mode (design.md §5.10): is this member the current follow target? */
+  following?: boolean;
+  onToggleFollow?: () => void;
   onClose: () => void;
   onLeaveRoom?: () => void;
   /** Save a new display name for self (only used for the self panel). */
@@ -38,6 +41,8 @@ export function MemberDetailPanel({
   canKick,
   onKick,
   onPoke,
+  following,
+  onToggleFollow,
   onClose,
   onLeaveRoom,
   onRename,
@@ -54,8 +59,52 @@ export function MemberDetailPanel({
       canKick={canKick}
       onKick={onKick}
       onPoke={onPoke}
+      following={following}
+      onToggleFollow={onToggleFollow}
       onClose={onClose}
     />
+  );
+}
+
+/**
+ * Primary "Follow / Stop following" button (design.md §5.10) — the single entry
+ * point into follow mode, so tapping an avatar keeps its cheap select-and-look
+ * meaning.
+ */
+function FollowButton({
+  following,
+  onToggle,
+  accent,
+}: {
+  following: boolean;
+  onToggle: () => void;
+  accent: string;
+}) {
+  const t = useUiStore((s) => s.t);
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      style={{
+        width: '100%',
+        height: 46,
+        marginTop: 12,
+        borderRadius: 14,
+        border: following ? `1.5px solid ${withAlpha(accent, 0.4)}` : 'none',
+        cursor: 'pointer',
+        background: following ? withAlpha(accent, 0.1) : accent,
+        color: following ? accent : '#fff',
+        fontFamily: 'inherit',
+        fontSize: 14.5,
+        fontWeight: 750,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 8,
+      }}
+    >
+      ◎ {following ? t('followStop') : t('follow')}
+    </button>
   );
 }
 
@@ -262,6 +311,8 @@ function OtherPanel({
   canKick,
   onKick,
   onPoke,
+  following,
+  onToggleFollow,
   onClose,
 }: {
   member: MemberView;
@@ -269,6 +320,8 @@ function OtherPanel({
   canKick?: boolean;
   onKick?: (deviceId: string) => void;
   onPoke?: (text: string) => void;
+  following?: boolean;
+  onToggleFollow?: () => void;
   onClose: () => void;
 }) {
   const t = useUiStore((s) => s.t);
@@ -300,6 +353,14 @@ function OtherPanel({
   return (
     <section>
       <PanelHeader name={name} accent={tokens.target} status={member.status} onClose={onClose} />
+
+      {onToggleFollow && (
+        <FollowButton
+          following={Boolean(following)}
+          onToggle={onToggleFollow}
+          accent={tokens.self}
+        />
+      )}
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 12 }}>
         <Metric
@@ -412,6 +473,8 @@ export function RallyDetailPanel({
   point,
   ownLocation,
   canEdit,
+  following,
+  onToggleFollow,
   onSetRadius,
   onDelete,
   onClose,
@@ -419,6 +482,8 @@ export function RallyDetailPanel({
   point: RallyPoint;
   ownLocation: LiveLocation | null;
   canEdit: boolean;
+  following?: boolean;
+  onToggleFollow?: () => void;
   onSetRadius: (radius: number) => void;
   onDelete: () => void;
   onClose: () => void;
@@ -443,6 +508,9 @@ export function RallyDetailPanel({
   return (
     <section>
       <PanelHeader name={`📍 ${point.name}`} accent="#7c3aed" status="online" onClose={onClose} />
+      {onToggleFollow && (
+        <FollowButton following={Boolean(following)} onToggle={onToggleFollow} accent="#7c3aed" />
+      )}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 12 }}>
         <Metric
           label={t('distance')}
@@ -464,7 +532,7 @@ export function RallyDetailPanel({
                   padding: '0 12px',
                   borderRadius: 10,
                   border: `1.5px solid ${active ? '#7c3aed' : tokens.line}`,
-                  background: active ? withAlpha('#7c3aed', 0.1) : '#fff',
+                  background: active ? 'rgba(124, 58, 237, 0.1)' : '#fff',
                   color: active ? '#7c3aed' : tokens.inkSoft,
                   fontFamily: 'inherit',
                   fontSize: 12.5,

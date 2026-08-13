@@ -1,6 +1,21 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { LiveLocation, RallyPoint, TrackPoint } from '@zhinzen/shared-types';
-import { buildTrackSegments } from '@zhinzen/geo-utils';
+import type { LatLng, LiveLocation, RallyPoint, TrackPoint } from '@zhinzen/shared-types';
+import {
+  buildTrackSegments,
+  calculateDistance,
+  destinationPoint,
+  metersPerPixel,
+  normalizeAngle,
+  zoomForMeters,
+  DEFAULT_FOLLOW_ANCHOR_FRAC,
+  DEFAULT_FOLLOW_CENTER_TAU_MS,
+  DEFAULT_FOLLOW_GPS_HEADING_TAU_MS,
+  DEFAULT_FOLLOW_HEADING_TAU_MS,
+  DEFAULT_FOLLOW_MARGIN_M,
+  DEFAULT_FOLLOW_MAX_ZOOM,
+  DEFAULT_FOLLOW_MIN_ZOOM,
+  DEFAULT_FOLLOW_ZOOM_EPSILON,
+} from '@zhinzen/geo-utils';
 import { color as tokens, font, withAlpha } from '@zhinzen/shared-ui';
 
 import { isMapsConfigured, mapsMapId } from '../../lib/env';
@@ -8,7 +23,12 @@ import { loadGoogleMaps } from '../../lib/googleMaps';
 import type { MemberView, MemberViewStatus } from '../../state/membersStore';
 import { useUiStore } from '../../state/uiStore';
 
-type FollowMode = 'self' | 'free' | 'track';
+/**
+ * Camera behavior. `track` is follow mode (design.md §5.10) — keep me and the
+ * target framed; `trackPaused` is the same follow session with the camera handed
+ * back to the user after they panned, so a stray touch doesn't end it.
+ */
+export type FollowMode = 'self' | 'free' | 'track' | 'trackPaused';
 
 interface GoogleMapViewProps {
   members: MemberView[];
@@ -17,6 +37,8 @@ interface GoogleMapViewProps {
   ownDeviceId: string;
   /** Camera behavior: follow self, free pan, or frame self + tracked member. */
   followMode: FollowMode;
+  /** Where the follow-mode target is right now (member or rally), if any. */
+  followTargetPoint: LatLng | null;
   recenterSignal: number;
   /** Bump to frame every visible member (the "show everyone" button). */
   fitAllSignal: number;
@@ -24,6 +46,8 @@ interface GoogleMapViewProps {
   headingUp: boolean;
   /** Latest device compass heading (degrees, 0 = north), or null. */
   deviceHeading: number | null;
+  /** True when `deviceHeading` is a GPS course (sparse) rather than the compass. */
+  headingFromGps: boolean;
   selectedDeviceId: string | null;
   trackPoints: TrackPoint[];
   rallyPoints: RallyPoint[];
@@ -48,6 +72,32 @@ interface MapPin {
 
 const DEFAULT_CENTER = { lat: 35.681236, lng: 139.767125 };
 const DEFAULT_ZOOM = 15;
+/** Street-level zoom the camera glides to when a target is selected. */
+const TARGET_FOCUS_ZOOM = 17;
+/**
+ * Viewport insets follow mode keeps clear (px): the top bars, the peeked bottom
+ * sheet + the FAB column. You are anchored inside what's left.
+ */
+const FOLLOW_PAD = { top: 120, right: 72, bottom: 150, left: 24 };
+
+/** How far below the viewport center your anchor sits, in pixels. */
+function anchorOffsetPx(viewH: number): number {
+  const usableH = Math.max(120, viewH - FOLLOW_PAD.top - FOLLOW_PAD.bottom);
+  const anchorY = FOLLOW_PAD.top + DEFAULT_FOLLOW_ANCHOR_FRAC * usableH;
+  return anchorY - viewH / 2;
+}
+
+/**
+ * Visible radius around the anchor, in pixels: the distance to the nearest usable
+ * edge. Sizing the zoom by this keeps the target on screen whichever way it lies.
+ */
+function anchorRadiusPx(viewW: number, viewH: number): number {
+  const usableH = Math.max(120, viewH - FOLLOW_PAD.top - FOLLOW_PAD.bottom);
+  const usableW = Math.max(120, viewW - FOLLOW_PAD.left - FOLLOW_PAD.right);
+  const above = DEFAULT_FOLLOW_ANCHOR_FRAC * usableH;
+  const below = usableH - above;
+  return Math.min(usableW / 2, above, below);
+}
 
 const PIN_COLORS: Record<MemberViewStatus | 'self', string> = {
   self: '#2563eb',
@@ -71,10 +121,12 @@ export function GoogleMapView({
   ownDisplayName,
   ownDeviceId,
   followMode,
+  followTargetPoint,
   recenterSignal,
   fitAllSignal,
   headingUp,
   deviceHeading,
+  headingFromGps,
   selectedDeviceId,
   trackPoints,
   rallyPoints,
@@ -91,6 +143,11 @@ export function GoogleMapView({
   const markersRef = useRef<Map<string, google.maps.Marker>>(new Map());
   const rallyMarkersRef = useRef<Map<string, google.maps.Marker>>(new Map());
   const trackSegmentsRef = useRef<google.maps.Polyline[]>([]);
+  const trackPointsRef = useRef<TrackPoint[]>(trackPoints);
+  trackPointsRef.current = trackPoints;
+  // True while the camera is animating (zoom in flight) — used to defer track
+  // rebuilds until the map settles, so zooming stays smooth.
+  const mapMovingRef = useRef(false);
   const rallyCircleRef = useRef<google.maps.Circle | null>(null);
   const onUserPanRef = useRef(onUserPan);
   const onLongPressRef = useRef(onLongPress);
@@ -110,14 +167,21 @@ export function GoogleMapView({
   const selfLocation = pins.find((pin) => pin.isSelf)?.location ?? null;
   const focusLocation = selfLocation ?? pins[0]?.location ?? null;
   const selectedRally = rallyPoints.find((p) => p.id === selectedRallyId) ?? null;
-  const targetLocation =
-    pins.find((pin) => !pin.isSelf && pin.id === selectedDeviceId)?.location ?? null;
-  // The thing the camera frames with self in track mode: selected member or rally.
-  const targetLatLng: google.maps.LatLngLiteral | null =
-    toLatLng(targetLocation) ?? (selectedRally ? { lat: selectedRally.lat, lng: selectedRally.lng } : null);
   // Track the moving lat/lng as primitives so follow effects re-run on movement.
   const focusLat = focusLocation?.lat ?? null;
   const focusLng = focusLocation?.lng ?? null;
+  const followLat = followTargetPoint?.lat ?? null;
+  const followLng = followTargetPoint?.lng ?? null;
+  // Everything the per-frame camera driver reads. Kept in refs so new positions and
+  // compass samples never re-render this component.
+  const headingTargetRef = useRef<number | null>(null);
+  headingTargetRef.current = headingUp ? deviceHeading : null;
+  const headingTauRef = useRef(DEFAULT_FOLLOW_HEADING_TAU_MS);
+  headingTauRef.current = headingFromGps
+    ? DEFAULT_FOLLOW_GPS_HEADING_TAU_MS
+    : DEFAULT_FOLLOW_HEADING_TAU_MS;
+  const followRef = useRef<{ lat: number; lng: number; zoom: number } | null>(null);
+  const followActive = followMode === 'track' && followLat !== null && followLng !== null;
 
   useEffect(() => {
     if (!mapEl.current || !isMapsConfigured()) return;
@@ -154,9 +218,21 @@ export function GoogleMapView({
         // not), so this cleanly drops follow mode when the user moves the map.
         map.addListener('dragstart', () => onUserPanRef.current());
         map.addListener('heading_changed', () => onHeadingChangeRef.current(map.getHeading() ?? 0));
-        // Long-press (touch) / right-click (desktop) drops a rally point.
-        map.addListener('contextmenu', (e: google.maps.MapMouseEvent) => {
+        // Tap empty map to drop a rally point (works on mobile-web, unlike the
+        // long-press `contextmenu` event). Marker taps fire the marker's own click,
+        // not this, so tapping a member/rally still just selects it.
+        map.addListener('click', (e: google.maps.MapMouseEvent) => {
           if (e.latLng) onLongPressRef.current(e.latLng.lat(), e.latLng.lng());
+        });
+        // Defer track (re)building until the camera settles: rebuilding on every
+        // zoom step mid-animation made zooming janky. While moving we just let the
+        // existing polylines transform; on `idle` we rebuild once at the final zoom.
+        map.addListener('zoom_changed', () => {
+          mapMovingRef.current = true;
+        });
+        map.addListener('idle', () => {
+          mapMovingRef.current = false;
+          syncTrackSegments(map, trackSegmentsRef.current, trackPointsRef.current, map.getZoom() ?? 16);
         });
         mapRef.current = map;
         setLoadState('ready');
@@ -215,67 +291,142 @@ export function GoogleMapView({
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
-
-    const render = () =>
+    // Render now only when the camera is settled; if it's mid-animation the `idle`
+    // listener (set up at map init) will rebuild once it stops.
+    if (!mapMovingRef.current) {
       syncTrackSegments(map, trackSegmentsRef.current, trackPoints, map.getZoom() ?? 16);
-    render();
-
-    // Re-thin/re-color when the zoom changes, debounced so a pinch doesn't rebuild
-    // on every frame.
-    let timer: number | undefined;
-    const listener = map.addListener('zoom_changed', () => {
-      window.clearTimeout(timer);
-      timer = window.setTimeout(render, 150);
-    });
-    return () => {
-      window.clearTimeout(timer);
-      listener.remove();
-    };
+    }
   }, [trackPoints]);
 
-  // Follow self: keep the camera on the user's marker as it moves. `recenterSignal`
-  // forces a re-center even if the position has not changed (the recenter button).
+  // Follow self: keep the camera on the user's marker as it moves.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || followMode !== 'self' || focusLat === null || focusLng === null) return;
 
     map.panTo({ lat: focusLat, lng: focusLng });
     if ((map.getZoom() ?? 0) < DEFAULT_ZOOM) map.setZoom(DEFAULT_ZOOM);
-  }, [followMode, focusLat, focusLng, recenterSignal]);
+  }, [followMode, focusLat, focusLng]);
 
-  // Track mode: frame self + the selected member once on selection (not on every
-  // position tick, to avoid jitter). Extra bottom padding keeps both pins above
-  // the bottom sheet. `recenterSignal` lets the recenter button re-fit.
+  // Recenter button: re-center even if the position has not changed, and in any
+  // follow mode (during a paused follow it just hands the view back to you).
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || followMode !== 'track') return;
-
-    const self = toLatLng(focusLocation);
-    const target = targetLatLng;
-    if (self && target) {
-      const bounds = new google.maps.LatLngBounds();
-      bounds.extend(self);
-      bounds.extend(target);
-      map.fitBounds(bounds, { top: 110, right: 64, bottom: 320, left: 64 });
-    } else if (target) {
-      map.panTo(target);
-    } else if (self) {
-      map.panTo(self);
-    }
+    if (!map || recenterSignal === 0 || focusLat === null || focusLng === null) return;
+    map.panTo({ lat: focusLat, lng: focusLng });
+    if ((map.getZoom() ?? 0) < DEFAULT_ZOOM) map.setZoom(DEFAULT_ZOOM);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [followMode, selectedDeviceId, selectedRallyId, recenterSignal]);
+  }, [recenterSignal]);
 
-  // Heading-up: rotate the map to match the device compass; off → snap to north.
-  // No-op on raster maps (no Map ID), where setHeading has no visible effect.
+  // Follow mode (design.md §5.10): you are the anchor. The camera is centered on
+  // *you*, parked at a fixed screen point below middle, and the zoom is sized so the
+  // target stays inside the visible radius. `fitBounds` is deliberately not used — it
+  // computes a north-aligned box (wrong once the map is rotated heading-up) and resets
+  // the heading.
+  useEffect(() => {
+    const el = mapEl.current;
+    if (!el || !followActive || focusLat === null || focusLng === null) {
+      followRef.current = null;
+      return;
+    }
+    const me = { lat: focusLat, lng: focusLng };
+    // The target must fit within the *radius* from the anchor to the nearest edge.
+    const radiusPx = Math.max(80, anchorRadiusPx(el.clientWidth, el.clientHeight));
+    const needM = calculateDistance(me, { lat: followLat!, lng: followLng! }) + DEFAULT_FOLLOW_MARGIN_M;
+    let zoom = Math.min(
+      DEFAULT_FOLLOW_MAX_ZOOM,
+      Math.max(DEFAULT_FOLLOW_MIN_ZOOM, zoomForMeters(me.lat, needM, radiusPx)),
+    );
+    // Zoom dead zone: the distance between you jitters constantly, and reacting to
+    // every wobble makes the map "breathe".
+    const prev = followRef.current;
+    if (prev && Math.abs(zoom - prev.zoom) < DEFAULT_FOLLOW_ZOOM_EPSILON) zoom = prev.zoom;
+    followRef.current = { lat: me.lat, lng: me.lng, zoom };
+  }, [followActive, focusLat, focusLng, followLat, followLng]);
+
+  // Single per-frame camera driver for heading-up rotation and follow framing. Both
+  // must be applied together in one `moveCamera`: as the heading turns, the camera
+  // center has to orbit around *you* to keep you pinned to the screen anchor, so the
+  // offset can only be recomputed with the current heading — every frame.
+  useEffect(() => {
+    const map = mapRef.current;
+    const el = mapEl.current;
+    if (!map || !el) return;
+    if (!headingUp && !followActive) {
+      if (!headingUp) map.setHeading(0);
+      return;
+    }
+
+    let frame = 0;
+    let last = performance.now();
+    let heading = map.getHeading() ?? 0;
+    let lat: number | null = null;
+    let lng: number | null = null;
+    let zoom = map.getZoom() ?? DEFAULT_ZOOM;
+
+    const tick = (now: number) => {
+      frame = requestAnimationFrame(tick);
+      const dt = Math.min(120, now - last);
+      last = now;
+
+      const headingTarget = headingTargetRef.current;
+      if (headingUp && headingTarget !== null) {
+        const delta = shortestAngleDelta(headingTarget, heading);
+        heading =
+          Math.abs(delta) < 0.05
+            ? headingTarget
+            : normalizeAngle(heading + delta * (1 - Math.exp(-dt / headingTauRef.current)));
+      }
+
+      const follow = followRef.current;
+      if (!follow) {
+        lat = null;
+        map.moveCamera({ heading });
+        return;
+      }
+
+      // Ease toward the newest fix so GPS packets don't arrive as visible jumps.
+      const k = 1 - Math.exp(-dt / DEFAULT_FOLLOW_CENTER_TAU_MS);
+      if (lat === null || lng === null) {
+        lat = follow.lat;
+        lng = follow.lng;
+        zoom = follow.zoom;
+      } else {
+        lat += (follow.lat - lat) * k;
+        lng += (follow.lng - lng) * k;
+        zoom += (follow.zoom - zoom) * k;
+      }
+
+      // You sit below the screen center, so the camera center is that many pixels
+      // *up-screen* from you — and up-screen is the current heading.
+      const offsetPx = anchorOffsetPx(el.clientHeight);
+      const center =
+        offsetPx === 0
+          ? { lat, lng }
+          : destinationPoint({ lat, lng }, heading, offsetPx * metersPerPixel(lat, zoom));
+      map.moveCamera({ center, zoom, heading });
+    };
+
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [headingUp, followActive, loadState]);
+
+  // On selecting any target — another member, a rally, or your own avatar — glide to
+  // it in one smooth pan+zoom at a consistent street-level zoom. Runs once on
+  // selection; for self, the follow effect above keeps tracking you afterwards.
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
-    if (headingUp && deviceHeading !== null) {
-      map.setHeading(deviceHeading);
-    } else if (!headingUp) {
-      map.setHeading(0);
-    }
-  }, [headingUp, deviceHeading]);
+    const selectedPin = selectedDeviceId
+      ? pins.find((pin) => pin.id === selectedDeviceId) ?? null
+      : null;
+    const focusPt =
+      (selectedPin ? { lat: selectedPin.location.lat, lng: selectedPin.location.lng } : null) ??
+      (selectedRally ? { lat: selectedRally.lat, lng: selectedRally.lng } : null);
+    if (!focusPt) return;
+    map.panTo(focusPt);
+    map.setZoom(TARGET_FOCUS_ZOOM);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedDeviceId, selectedRallyId]);
 
   // Show everyone: frame all visible pins with padding for the bottom sheet.
   useEffect(() => {
@@ -463,32 +614,43 @@ function syncTrackSegments(
   points: TrackPoint[],
   zoom: number,
 ): void {
-  clearTrackSegments(segments);
-  segments.length = 0;
-
   const ordered = points
     .filter((point) => Number.isFinite(point.lat) && Number.isFinite(point.lng))
     .sort((a, b) => a.createdAt - b.createdAt);
 
   // Simplify by zoom + merge same-color runs (one polyline per run instead of
   // one per point).
-  for (const seg of buildTrackSegments(ordered, zoom)) {
-    segments.push(
-      new google.maps.Polyline({
-        map,
-        path: seg.path,
+  const built = buildTrackSegments(ordered, zoom);
+
+  // Reuse existing polyline overlays in place (setOptions) instead of destroying
+  // and recreating them every refresh — overlay churn was the rendering bottleneck.
+  for (let i = 0; i < built.length; i++) {
+    const seg = built[i];
+    let poly = segments[i];
+    if (!poly) {
+      poly = new google.maps.Polyline({
         geodesic: true,
-        strokeColor: seg.colorHex,
         strokeOpacity: 0.82,
         strokeWeight: 6,
         zIndex: 6,
-      }),
-    );
+      });
+      segments[i] = poly;
+    }
+    poly.setOptions({ path: seg.path, strokeColor: seg.colorHex });
+    if (poly.getMap() !== map) poly.setMap(map);
   }
+  // Detach any leftover overlays from a previously longer track.
+  for (let i = built.length; i < segments.length; i++) segments[i].setMap(null);
+  segments.length = built.length;
 }
 
 function clearTrackSegments(segments: google.maps.Polyline[]): void {
   for (const segment of segments) segment.setMap(null);
+}
+
+/** Shortest signed angular distance from `current` to `target`, in (-180, 180]. */
+function shortestAngleDelta(target: number, current: number): number {
+  return ((target - current + 540) % 360) - 180;
 }
 
 function toLatLng(location: LiveLocation | null): google.maps.LatLngLiteral | null {

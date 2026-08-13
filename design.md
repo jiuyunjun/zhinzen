@@ -664,6 +664,118 @@ UWB 能力：
 web 为应用内 toast。**限制**：彻底杀掉 App(进程没了)收不到 → 真正离线推送需接 FCM(未做)。
 geofence/battery 评估在客户端进行(android VM、web effect)。
 
+### 5.10 追踪模式（跟车模式，设计确定 / 待实现）
+
+**场景**：和朋友一起骑车/开车出行,手机在支架上,只用余光扫一眼就要知道「他在我哪个方向、
+还有多远」。要求:信息量小、地图不能自己乱跳、全程零操作。
+
+#### 状态模型
+
+追踪目标**独立于「选中」**(`selectedDeviceId`)——用户会把底部 sheet 拖下去只看地图,
+此时详情关了但追踪必须继续:
+
+```
+followTarget: { kind: 'member' | 'rally'; id: string } | null
+followMode:   'self' | 'free' | 'track' | 'trackPaused'
+```
+
+| 事件 | 结果 |
+| --- | --- |
+| 成员/集结点详情点「◎ 追踪」 | `track` + 设 target;heading-up 打开(记住进入前的值);sheet 自动收到 peek |
+| 用户拖动/缩放地图 | `trackPaused`(**不退出**),地图中下方出现胶囊「恢复追踪 X」 |
+| 点胶囊 | 回 `track` |
+| 点「退出追踪」/ 离开房间 | `self`,heading-up 复原 |
+| 目标离线 / 停止共享 / 掉出成员列表 / 集结点被删 | **不结束**。继续追最后一次已知位置,顶栏显示该位置的年龄「1m20s 前」 |
+
+**两条硬规则**(用户明确要求,别再"优化"回去):
+1. **拖动只暂停不退出**——`onUserPan → 'free'` 会让追踪一去不回,骑车误触即失效。
+2. **除手动退出外,任何情况都不自动解除追踪**——信号断了恰恰是最需要相机停在对方最后位置的时候。
+   实现上要把最后一次已知点**粘住**(web `lastFollowRef`,android `refreshFollowInfo` 只在拿到新值时覆盖)。
+   曾按成员状态自动结束,结果 `deriveStatus` 里 `!member.online`(该字段本就不可靠,见 §4.4)一抖动
+   就秒退出——这是个反面教材。
+
+#### 相机算法（关键）
+
+**以「我」为锚点。** 相机中心跟着**我**走,我被钉在屏幕**中央偏下**的固定点上
+(`ANCHOR_FRAC = 0.62`,即可用区域从上往下 62% 处),缩放则大到"对方落在我周围的可视半径内"。
+
+> 早期版本把相机中心设为**两人中点**,结果:地图绕相机中心旋转 → **我自己在屏幕上公转**,
+> 对方一动我就在屏幕里滑来滑去,极其晕。旋转圆心必须是我。
+
+「朝向跟着转」和「框住两个人」还会在另一处打架:`fitBounds`(web)/`newLatLngBounds`(android)
+算的是**正北向包围盒**,地图一旦带 bearing 旋转这个盒子就不成立,且 `fitBounds` 会重置 heading。
+**所以追踪模式不用 fitBounds,自行算相机**——用**以我为心的圆**,对旋转天然不变:
+
+```
+radiusPx = min(usableW/2, anchor 到可用区上边距, anchor 到下边距)   // 最近边界
+needM    = haversine(me, target) + MARGIN_M(40)                    // 半径,不是直径
+zoom     = clamp(zoomForMeters(myLat, needM, radiusPx), 13, 17.5)
+center   = 从「我」沿**当前 bearing**(屏幕向上)前移 offsetPx 像素
+           offsetPx = anchorY - viewH/2 (我在中心下方多少像素)
+bearing  = 见下「朝向来源」
+```
+
+**`center` 必须每帧用当前 bearing 重算** —— 转向时相机中心要绕着我公转,才能把我钉在锚点上。
+只在位置更新时(约 1s)算一次是不够的,那正是"我在屏幕里乱跑"的另一半原因。
+
+`zoomForMeters()` = 已有 `metersPerPixel()` 的反函数,加进 `@zhinzen/geo-utils`,
+android 在 `data/Geo.kt` 镜像一份(与现有共享算法做法一致)。
+
+**驱动方式:单一每帧驱动器,不要用补间动画。**
+- **绝不能**把"旋转"和"取景"做成两个动画(web 两次 `panTo`/`moveCamera`、android 两个
+  `cameraPositionState.animate`)——它们会**互相 cancel**;android 上每来一个罗盘样本就重启
+  一次 400ms 缓动,相机永远只播放缓动曲线最慢的开头 → 又粘又拖,这就是"手感怪"的主因。
+- 正确做法:**一个循环**(web `requestAnimationFrame`,android `withFrameNanos`),
+  用指数平滑把 center / zoom / bearing 各自逼近目标值,然后**一次性**写相机
+  (web `map.moveCamera({center, zoom, heading})`,android 直接赋值 `cameraPositionState.position`)。
+  用户正在手势操作时(android `cameraMoveStartedReason == GESTURE`)跳过写入,别和用户抢。
+
+| 参数 | 值 | 原因 |
+| --- | --- | --- |
+| zoom 死区 | 与当前差 <0.35 不动 | 两人距离一直微抖,否则不停微缩放 |
+| center/zoom 平滑 τ | 220ms | GPS 包 2–5s 一个,平滑掉才不会一跳一跳 |
+| bearing 平滑 τ(罗盘) | 90ms | 罗盘 ~25 样本/s,跟手 |
+| bearing 平滑 τ(GPS 航向) | 450ms | GPS 航向一个位置包才一个,不重平滑会猛甩 |
+
+zoom 上限 17.5:并排骑行(<30m)时不要糊到街景级别,看不出相对关系。
+
+#### 朝向来源：GPS 航向优先，罗盘兜底
+
+骑车/开车时罗盘是**最差**的朝向源(车架/支架磁铁、电机让磁力计漂移,即
+`compassNeedsCalibration` 提示的成因)。但移动时有更好的来源:GPS 的 course over ground,
+且 `LiveLocation.heading` / `speed` **已在采集**。
+
+```
+speed >= 3 m/s (≈11km/h) 且 heading != null → 用 GPS heading
+否则                                        → 用罗盘 heading
+两源切换时做 400ms 角度插值,避免起步瞬间画面猛转
+```
+
+仅在回落到罗盘且精度低时才显示「画 8 字校准」横幅(移动中不提示)。
+
+#### UI
+
+- **入口**:成员详情 / 集结点详情顶部主按钮「◎ 追踪」。**点头像的行为不变**(选中+聚焦)。
+- **追踪顶栏条**(一行、大字,骑行可扫读):`◎ 小明   320 m   ↑ 前方偏右 30°  ✕`。
+  已 heading-up,故箭头即"往那边看";复用详情里已有的连续角+动画防绕圈。
+  **退出**就是这条上的 ✕(比换 FAB 更好找;heading-up 期间 compass FAB 保持原样可用)。
+- **暂停胶囊**:`trackPaused` 时顶栏条下方出现「恢复追踪 X」,一点即回。
+- **recenter / fitAll FAB**:追踪中点它们 → 进 `trackPaused`(不退出)。
+- **底部 sheet**:进入追踪自动收到 peek。
+
+#### 降级与边界
+
+| 情况 | 行为 |
+| --- | --- |
+| web 无 vector Map ID(`isMapRotatable()` false) | 追踪照常可用,只是地图不旋转;箭头改为"相对正北",提示一次 `rotateNeedsMapId` |
+| iOS Safari 无 DeviceOrientation 权限 | 静止时无朝向 → 用最后一次 GPS heading,再没有则锁正北 |
+| 距离 >30km | zoom 触底(13),对方可能落在视野外,顶栏距离仍然准 |
+| 目标 `sharingLocation=false` / 被踢 / 离线 | **不退出**,继续追最后已知位置 + 显示年龄(见上"两条硬规则") |
+| web 双指捏合缩放 | Maps JS 只有 `dragstart` 能可靠区分手势,捏合**不会**触发暂停(拖动会)。android 用 `cameraMoveStartedReason == GESTURE`,捏合也能暂停 |
+
+**对称性**:被追踪方**不感知**、不发通知——同房间本就互相可见,加提示只是打扰。
+**掉队提醒**(距离超阈值震动)已评估,本期**不做**。
+
 ---
 
 ## 6. 后端设计

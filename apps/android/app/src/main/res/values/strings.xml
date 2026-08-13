@@ -79,4 +79,8 @@
     <string name="nearby_badge">附近</string>
     <string name="uwb_distance">UWB · %1$s 米</string>
     <string name="uwb_precise">精准定位（方向已校准）</string>
+    <string name="compass_calibrate">罗盘精度低，请手持手机画 8 字校准</string>
+    <string name="follow">追踪</string>
+    <string name="follow_stop">退出追踪</string>
+    <string name="follow_resume">恢复追踪 %1$s</string>
 </resources>

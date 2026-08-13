@@ -78,4 +78,8 @@
     <string name="nearby_badge">Nearby</string>
     <string name="uwb_distance">UWB · %1$s m</string>
     <string name="uwb_precise">Precise (direction calibrated)</string>
+    <string name="compass_calibrate">Compass accuracy is low — wave your phone in a figure-8 to calibrate</string>
+    <string name="follow">Follow</string>
+    <string name="follow_stop">Stop following</string>
+    <string name="follow_resume">Resume following %1$s</string>
 </resources>

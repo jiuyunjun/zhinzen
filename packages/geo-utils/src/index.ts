@@ -4,9 +4,11 @@
  */
 import type { LatLng, Millis, TrackPoint } from '@zhinzen/shared-types';
 import {
+  DEFAULT_FOLLOW_MAX_ZOOM,
   DEFAULT_POOR_ACCURACY_M,
   DEFAULT_SIMPLIFY_TOLERANCE_M,
   DEFAULT_STALE_MS,
+  DEFAULT_TRACK_GAP_BREAK_MS,
   EARTH_RADIUS_M,
 } from './constants';
 
@@ -150,13 +152,48 @@ export function metersPerPixel(lat: number, zoom: number): number {
   return (156543.03392 * Math.cos(toRad(lat))) / 2 ** zoom;
 }
 
-// Speed→color ramp (km/h): 0–15 red, ~28 yellow, 40+ green. Shared so the
-// quantized bucket colors match the original continuous gradient.
+/**
+ * Inverse of {@link metersPerPixel}: the zoom at which `meters` of ground spans
+ * `pixels` on screen. Follow mode uses it to frame two people without
+ * `fitBounds` — a north-aligned bounding box breaks once the map is rotated to
+ * heading-up, so we size the camera by the pair's *enclosing circle* instead,
+ * which is rotation-invariant (design.md §5.10).
+ */
+export function zoomForMeters(lat: number, meters: number, pixels: number): number {
+  if (!(meters > 0) || !(pixels > 0)) return DEFAULT_FOLLOW_MAX_ZOOM;
+  return Math.log2((156543.03392 * Math.cos(toRad(lat)) * pixels) / meters);
+}
+
+/**
+ * The point `meters` away from `from` along `bearingDeg` (0 = north, clockwise).
+ * Used to nudge the follow-mode camera center along the *screen* axis so the
+ * framed pair sits above the bottom sheet.
+ */
+export function destinationPoint(from: LatLng, bearingDeg: number, meters: number): LatLng {
+  const δ = meters / EARTH_RADIUS_M;
+  const θ = toRad(bearingDeg);
+  const φ1 = toRad(from.lat);
+  const λ1 = toRad(from.lng);
+
+  const φ2 = Math.asin(Math.sin(φ1) * Math.cos(δ) + Math.cos(φ1) * Math.sin(δ) * Math.cos(θ));
+  const λ2 =
+    λ1 +
+    Math.atan2(
+      Math.sin(θ) * Math.sin(δ) * Math.cos(φ1),
+      Math.cos(δ) - Math.sin(φ1) * Math.sin(φ2),
+    );
+
+  return { lat: toDeg(φ2), lng: ((toDeg(λ2) + 540) % 360) - 180 };
+}
+
+// Speed→color ramp (km/h): only stopped/walking is red, slow riding warms to
+// yellow, and normal riding/driving is green. Shared so the quantized bucket
+// colors match the continuous gradient.
 const TRACK_STOPS: ReadonlyArray<readonly [number, readonly [number, number, number]]> = [
-  [0, [220, 38, 38]],
-  [15, [220, 38, 38]],
-  [28, [234, 179, 8]],
-  [40, [34, 197, 94]],
+  [0, [220, 38, 38]], // red — stopped / walking
+  [5, [220, 38, 38]],
+  [18, [234, 179, 8]], // yellow — slow riding / heavy traffic
+  [32, [34, 197, 94]], // green — riding / driving
   [200, [34, 197, 94]],
 ];
 /** Quantization step (km/h). Bigger = fewer colors → more segment merging. */
@@ -203,31 +240,96 @@ export interface TrackSegment {
  * color buckets, and merge consecutive same-color runs into one polyline. Turns
  * O(N) per-segment polylines into O(color runs), and drops sub-pixel detail when
  * zoomed out. Input must be time-ordered.
+ *
+ * Points more than `gapMs` apart in time are treated as separate runs and never
+ * joined by a line — so a long pause (e.g. the app was closed and reopened) shows
+ * as a break in the track, not one long straight segment across the gap.
  */
-export function buildTrackSegments<T extends LatLng & { speed: number }>(
+export function buildTrackSegments<T extends LatLng & { speed: number; createdAt: number }>(
   points: readonly T[],
   zoom: number,
   pixelTolerance = 2.5,
+  gapMs: number = DEFAULT_TRACK_GAP_BREAK_MS,
 ): TrackSegment[] {
   const ordered = points.filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lng));
   if (ordered.length < 2) return [];
-  const midLat = ordered[Math.floor(ordered.length / 2)].lat;
-  const tolerance = Math.max(0.5, metersPerPixel(midLat, zoom) * pixelTolerance);
-  const simplified = simplifyTrack(ordered, tolerance);
 
+  // Split into time-contiguous runs; each run is simplified + colored on its own
+  // and runs are never merged together, leaving a visible break across the gap.
   const segments: TrackSegment[] = [];
+  let runStart = 0;
+  for (let i = 1; i <= ordered.length; i++) {
+    const broke = i === ordered.length || ordered[i].createdAt - ordered[i - 1].createdAt > gapMs;
+    if (!broke) continue;
+    appendRunSegments(segments, ordered.slice(runStart, i), zoom, pixelTolerance);
+    runStart = i;
+  }
+  return segments;
+}
+
+/** Simplify + color one time-contiguous run, appending its segments to `out`. */
+function appendRunSegments<T extends LatLng & { speed: number; createdAt: number }>(
+  out: TrackSegment[],
+  run: readonly T[],
+  zoom: number,
+  pixelTolerance: number,
+): void {
+  if (run.length < 2) return;
+  // GPS Doppler speed is often missing (reported as 0/null) even while moving, which
+  // would colour the whole run red. Fall back to ground speed from consecutive-point
+  // distance ÷ time so a moving track is coloured by how fast it actually travelled.
+  // A median-of-3 pass removes single-sample spikes that would otherwise flip colour
+  // buckets back and forth and fragment the track into many tiny polylines.
+  const speeds = smoothSpeeds(run.map((p, i) => effectiveSpeed(i > 0 ? run[i - 1] : undefined, p)));
+  const midLat = run[Math.floor(run.length / 2)].lat;
+  const tolerance = Math.max(0.5, metersPerPixel(midLat, zoom) * pixelTolerance);
+  // Tag each point with its index so the simplified subset can look its speed back up.
+  const simplified = simplifyTrack(
+    run.map((p, i) => ({ ...p, _i: i })),
+    tolerance,
+  );
+
+  // A fresh run must not merge into the previous run's trailing segment.
+  const runHead = out.length;
   for (let i = 1; i < simplified.length; i++) {
     const a = simplified[i - 1];
     const b = simplified[i];
-    const colorHex = trackBucketColor(trackSpeedBucket((a.speed + b.speed) / 2));
-    const last = segments[segments.length - 1];
+    const colorHex = trackBucketColor(trackSpeedBucket((speeds[a._i] + speeds[b._i]) / 2));
+    const last = out.length > runHead ? out[out.length - 1] : undefined;
     if (last && last.colorHex === colorHex) {
       last.path.push({ lat: b.lat, lng: b.lng });
     } else {
-      segments.push({ path: [{ lat: a.lat, lng: a.lng }, { lat: b.lat, lng: b.lng }], colorHex });
+      out.push({ path: [{ lat: a.lat, lng: a.lng }, { lat: b.lat, lng: b.lng }], colorHex });
     }
   }
-  return segments;
+}
+
+/** Median-of-3 smoothing; endpoints unchanged. Tames single-sample speed spikes. */
+function smoothSpeeds(speeds: number[]): number[] {
+  if (speeds.length < 3) return speeds;
+  const out = speeds.slice();
+  for (let i = 1; i < speeds.length - 1; i++) {
+    const a = speeds[i - 1];
+    const b = speeds[i];
+    const c = speeds[i + 1];
+    out[i] = Math.max(Math.min(a, b), Math.min(Math.max(a, b), c));
+  }
+  return out;
+}
+
+/**
+ * Ground speed (m/s) for a track point: the reported GPS speed when present,
+ * otherwise derived from distance ÷ time since the previous point.
+ */
+function effectiveSpeed(
+  prev: (LatLng & { createdAt: number }) | undefined,
+  cur: LatLng & { speed: number; createdAt: number },
+): number {
+  if (Number.isFinite(cur.speed) && cur.speed > 0) return cur.speed;
+  if (!prev) return 0;
+  const dtSec = (cur.createdAt - prev.createdAt) / 1000;
+  if (dtSec <= 0) return 0;
+  return calculateDistance(prev, cur) / dtSec;
 }
 
 function perpendicularDistance(
