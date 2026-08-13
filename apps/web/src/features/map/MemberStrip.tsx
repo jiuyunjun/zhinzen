@@ -204,7 +204,7 @@ function RallyChip({
         border: 'none',
         padding: '2px 0',
         borderRadius: 14,
-        background: selected ? withAlpha('#7c3aed', 0.1) : 'transparent',
+        background: selected ? 'rgba(124, 58, 237, 0.1)' : 'transparent',
         cursor: 'pointer',
         fontFamily: 'inherit',
       }}
@@ -219,7 +219,7 @@ function RallyChip({
           alignItems: 'center',
           justifyContent: 'center',
           fontSize: 22,
-          boxShadow: `0 0 0 2.5px ${withAlpha('#7c3aed', 0.16)}`,
+          boxShadow: `0 0 0 2.5px rgba(124, 58, 237, 0.16)`,
         }}
       >
         📍
