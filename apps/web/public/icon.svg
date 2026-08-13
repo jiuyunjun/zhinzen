@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Zhinzen">
+  <rect width="512" height="512" rx="112" fill="#2563eb" />
+  <path
+    d="M256 120c-66 0-120 52-120 117 0 86 104 168 116 177a6 6 0 0 0 8 0c12-9 116-91 116-177 0-65-54-117-120-117z"
+    fill="#ffffff"
+  />
+  <circle cx="256" cy="237" r="44" fill="#2563eb" />
+</svg>

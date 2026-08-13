@@ -1,10 +1,16 @@
-import { useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { useDeviceStore } from './state/deviceStore';
 import { useRoomStore } from './state/roomStore';
 import { getFamilyRoom } from './lib/familyRoom';
 import { Onboarding } from './features/onboarding/Onboarding';
 import { RoomChoice } from './features/room/RoomChoice';
-import { MapScreen } from './features/map/MapScreen';
+
+// The map screen (Google Maps view, member detail, rally UI + the firestore/database
+// subscriptions it pulls in) is the heaviest part of the app. Load it on demand so
+// the onboarding / room-choice first paint stays small and fast.
+const MapScreen = lazy(() =>
+  import('./features/map/MapScreen').then((m) => ({ default: m.MapScreen })),
+);
 
 type Phase = 'onboarding' | 'room' | 'map';
 
@@ -54,11 +60,34 @@ export function App() {
   }
 
   return (
-    <MapScreen
-      onLeave={() => {
-        leaveRoom();
-        setPhase('room');
+    <Suspense fallback={<MapLoading />}>
+      <MapScreen
+        onLeave={() => {
+          leaveRoom();
+          setPhase('room');
+        }}
+      />
+    </Suspense>
+  );
+}
+
+/** Lightweight placeholder shown while the map chunk loads. */
+function MapLoading() {
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        inset: 0,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: '#eef3e8',
+        color: '#5b6070',
+        fontFamily: 'DM Mono, monospace',
+        fontSize: 13,
       }}
-    />
+    >
+      …
+    </div>
   );
 }

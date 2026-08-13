@@ -11,3 +11,12 @@ createRoot(rootEl).render(
     <App />
   </StrictMode>,
 );
+
+// Register the service worker (production only — in dev it would fight Vite HMR).
+if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => {
+      // PWA caching is a progressive enhancement; ignore registration failures.
+    });
+  });
+}
