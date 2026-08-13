@@ -30,6 +30,9 @@ ui-debug.log
 .runtimeconfig.json
 serviceAccountKey*.json
 
+# kotlin build metadata (Gradle/KGP scratch dir)
+.kotlin/
+
 # editor / os
 .DS_Store
 Thumbs.db
