@@ -9,9 +9,13 @@ import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 
+/** A compass sample: smoothed heading + the sensor's reported accuracy bucket. */
+data class CompassReading(val heading: Float, val accuracy: Int)
+
 /**
  * Device compass heading (degrees, 0 = north, clockwise) from the rotation-vector
- * sensor, low-pass smoothed. Mirrors the web sensorStore. Emits a cold Flow.
+ * sensor, low-pass smoothed, plus the sensor accuracy (so the UI can prompt a
+ * figure-8 calibration when it drops). Mirrors the web sensorStore. Cold Flow.
  */
 class CompassController(context: Context) {
     private val sensorManager =
@@ -20,7 +24,7 @@ class CompassController(context: Context) {
 
     fun isAvailable(): Boolean = rotationSensor != null
 
-    fun headings(): Flow<Float> = callbackFlow {
+    fun readings(): Flow<CompassReading> = callbackFlow {
         val sensor = rotationSensor
         if (sensor == null) {
             close()
@@ -32,6 +36,7 @@ class CompassController(context: Context) {
         var smoothed = Float.NaN
         var lastEmitted = Float.NaN
         var lastEmitAt = 0L
+        var accuracy = SensorManager.SENSOR_STATUS_ACCURACY_HIGH
 
         val listener =
             object : SensorEventListener {
@@ -56,11 +61,16 @@ class CompassController(context: Context) {
                     if (moved && now - lastEmitAt >= MIN_EMIT_INTERVAL_MS) {
                         lastEmitted = smoothed
                         lastEmitAt = now
-                        trySend(smoothed)
+                        trySend(CompassReading(smoothed, accuracy))
                     }
                 }
 
-                override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
+                override fun onAccuracyChanged(sensor: Sensor?, value: Int) {
+                    // Magnetometer drift shows up here; surface it immediately so the
+                    // calibration prompt can appear even when the phone is still.
+                    accuracy = value
+                    trySend(CompassReading(smoothed, value))
+                }
             }
 
         sensorManager.registerListener(listener, sensor, SensorManager.SENSOR_DELAY_GAME)
