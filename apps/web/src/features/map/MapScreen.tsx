@@ -30,7 +30,7 @@ import {
   watchRallyPoints,
 } from '../../lib/rallyApi';
 import { sendPoke, watchPokes } from '../../lib/pokeApi';
-import { GoogleMapView, type FollowMode } from './GoogleMapView';
+import { GoogleMapView, type FollowMode, type FollowTargetState } from './GoogleMapView';
 import { MemberDetailPanel, RallyDetailPanel } from './MemberDetailPanel';
 import { MemberStrip } from './MemberStrip';
 
@@ -142,7 +142,9 @@ export function MapScreen({ onLeave }: { onLeave: () => void }) {
   );
   // Only show a track for the explicitly selected member — including yourself when
   // you tap your own avatar. Nothing selected → no track (keeps the default map clean).
-  const trackDeviceId = selectedDeviceId;
+  // While actively following, the track is dropped entirely: you are watching the road,
+  // not a history trail, and its 15s poll + polyline rebuild is pure cost mid-ride.
+  const trackDeviceId = followMode === 'track' || followMode === 'trackBoth' ? null : selectedDeviceId;
 
   // ---- Follow mode (design.md §5.10) ----------------------------------------
   // A follow session only ever ends when *you* end it. If the target goes offline,
@@ -167,11 +169,19 @@ export function MapScreen({ onLeave }: { onLeave: () => void }) {
         };
       }
       const held = lastFollowRef.current;
+      // Three states worth telling apart while riding: they're moving, they've
+      // stopped, or we've lost them and are looking at an old fix.
+      const state: FollowTargetState =
+        !m || m.status === 'stale' || m.status === 'offline' || m.status === 'notSharing'
+          ? 'stale'
+          : (m.location?.speed ?? 0) < 0.6
+            ? 'stopped'
+            : 'moving';
       return {
         name,
         point: held ? { lat: held.lat, lng: held.lng } : null,
         updatedAt: held?.updatedAt ?? null,
-        stale: !m || m.status !== 'online',
+        state,
       };
     }
     const r = rallyPoints.find((p) => p.id === followTarget.id);
@@ -181,9 +191,21 @@ export function MapScreen({ onLeave }: { onLeave: () => void }) {
       name: r?.name ?? held?.name ?? '',
       point: held ? { lat: held.lat, lng: held.lng } : null,
       updatedAt: null,
-      stale: !r,
+      state: 'stopped' as FollowTargetState,
     };
   }, [followTarget, members, rallyPoints, t]);
+  const ownSpeed = effectiveOwnLocation?.speed ?? 0;
+  // Tick once a second while following so the "x ago" keeps counting up even when no
+  // new packets arrive — which is exactly when its value matters most.
+  const [, setAgeTick] = useState(0);
+  useEffect(() => {
+    if (!followTarget) return;
+    const id = window.setInterval(() => setAgeTick((n) => n + 1), 1000);
+    return () => window.clearInterval(id);
+  }, [followTarget]);
+  const followAgeLabel = followInfo?.updatedAt ? formatAgo(followInfo.updatedAt) : null;
+  // Reported by the map from its own bounds — no hand-rolled projection.
+  const [targetOffScreen, setTargetOffScreen] = useState(false);
 
   // Heading source: the GPS course over ground while actually moving, the compass
   // otherwise. A magnetometer next to a bike/car mount drifts badly — that drift is
@@ -212,6 +234,8 @@ export function MapScreen({ onLeave }: { onLeave: () => void }) {
       : isMapRotatable() && followHeading !== null
         ? normalizeAngle(followBearing - followHeading)
         : followBearing;
+  // Same angle folded into (-180, 180] so it reads as "ahead / to your right / …".
+  const followRelative = followArrow === null ? null : shortestAngleDelta(followArrow, 0);
 
   const startFollow = (kind: 'member' | 'rally', id: string) => {
     haptics.light();
@@ -584,6 +608,10 @@ export function MapScreen({ onLeave }: { onLeave: () => void }) {
         ownDeviceId={deviceId}
         followMode={followMode}
         followTargetPoint={followInfo?.point ?? null}
+        followTargetState={followInfo?.state ?? 'moving'}
+        ownSpeed={ownSpeed}
+        ownHeading={followHeading}
+        onFollowTargetOffScreen={setTargetOffScreen}
         recenterSignal={recenterSignal}
         fitAllSignal={fitAllSignal}
         headingUp={headingUp}
@@ -695,7 +723,7 @@ export function MapScreen({ onLeave }: { onLeave: () => void }) {
         </div>
       </div>
 
-      {/* follow-mode bar — one glanceable line while riding */}
+      {/* follow HUD — the one line that answers "which way, how far" */}
       {followInfo && (
         <div
           style={{
@@ -706,70 +734,104 @@ export function MapScreen({ onLeave }: { onLeave: () => void }) {
             zIndex: 40,
             display: 'flex',
             alignItems: 'center',
-            gap: 10,
-            height: 48,
-            padding: '0 6px 0 14px',
-            borderRadius: 15,
-            background: followMode === 'track' ? tokens.self : 'rgba(255,255,255,0.92)',
-            color: followMode === 'track' ? '#fff' : tokens.ink,
-            backdropFilter: 'blur(14px) saturate(160%)',
-            WebkitBackdropFilter: 'blur(14px) saturate(160%)',
-            boxShadow: '0 4px 14px rgba(0,0,0,0.16)',
+            gap: 12,
+            padding: '12px 14px',
+            borderRadius: 18,
+            background: 'rgba(255,255,255,0.93)',
+            backdropFilter: 'blur(16px) saturate(170%)',
+            WebkitBackdropFilter: 'blur(16px) saturate(170%)',
+            boxShadow: '0 6px 22px rgba(0,0,0,0.16)',
+            color: tokens.ink,
           }}
         >
-          <span
-            style={{
-              fontSize: 14.5,
-              fontWeight: 700,
-              maxWidth: 120,
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            ◎ {followInfo.name}
-          </span>
-          <span style={{ fontFamily: font.mono, fontSize: 17, fontWeight: 700 }}>
-            {followDistance ? `${followDistance.value} ${t(followDistance.unit)}` : t('unknown')}
-          </span>
           {followArrow !== null && (
             <span
               style={{
                 display: 'flex',
+                flexShrink: 0,
                 transform: `rotate(${followArrow}deg)`,
-                transition: 'transform 180ms ease',
+                transition: 'transform 220ms ease',
               }}
             >
-              <Icon name="nav" size={20} strokeWidth={2.4} />
+              <Icon
+                name="nav"
+                size={26}
+                strokeWidth={2.5}
+                color={followInfo.state === 'stale' ? tokens.stale : '#7c3aed'}
+              />
             </span>
           )}
-          {followInfo.stale && followInfo.updatedAt !== null && (
-            <span style={{ fontFamily: font.mono, fontSize: 12, opacity: 0.75 }}>
-              {formatAgo(followInfo.updatedAt)}
-            </span>
-          )}
-          <button
-            type="button"
-            onClick={stopFollow}
-            aria-label={t('followStop')}
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 5 }}>
+              <span style={{ fontFamily: font.mono, fontSize: 11.5, color: tokens.inkFaint }}>
+                {t('followApart')}
+              </span>
+              <span
+                style={{
+                  fontFamily: font.mono,
+                  fontSize: 26,
+                  fontWeight: 600,
+                  lineHeight: 1,
+                  letterSpacing: '-0.01em',
+                }}
+              >
+                {followDistance ? followDistance.value : '—'}
+              </span>
+              <span style={{ fontFamily: font.mono, fontSize: 14, opacity: 0.7 }}>
+                {followDistance ? t(followDistance.unit) : ''}
+              </span>
+            </div>
+            <div
+              style={{
+                fontSize: 12.5,
+                marginTop: 3,
+                color: tokens.inkSoft,
+                whiteSpace: 'nowrap',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+              }}
+            >
+              {followRelative !== null && t('followTargetAt', { dir: t(directionWord(followRelative)) })}
+              {targetOffScreen && ` · ${t('followOffScreen')}`}
+              {followAgeLabel && (
+                <>
+                  {' · '}
+                  <span style={{ color: followInfo.state === 'stale' ? tokens.stale : 'inherit' }}>
+                    {t('followUpdatedAgo', { t: followAgeLabel })}
+                  </span>
+                </>
+              )}
+            </div>
+          </div>
+          <span
             style={{
-              marginLeft: 'auto',
-              width: 36,
-              height: 36,
-              borderRadius: 12,
-              border: 'none',
-              cursor: 'pointer',
               flexShrink: 0,
+              fontFamily: font.mono,
+              fontSize: 10.5,
+              padding: '3px 7px',
+              borderRadius: 7,
               background:
-                followMode === 'track' ? 'rgba(255,255,255,0.22)' : withAlpha(tokens.offline, 0.16),
-              color: 'inherit',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
+                followInfo.state === 'moving'
+                  ? withAlpha(tokens.online, 0.16)
+                  : followInfo.state === 'stale'
+                    ? withAlpha(tokens.stale, 0.18)
+                    : withAlpha(tokens.offline, 0.2),
+              color:
+                followInfo.state === 'moving'
+                  ? tokens.online
+                  : followInfo.state === 'stale'
+                    ? tokens.stale
+                    : tokens.inkSoft,
             }}
           >
-            <Icon name="close" size={18} />
-          </button>
+            {t(
+              followInfo.state === 'moving'
+                ? 'followMoving'
+                : followInfo.state === 'stale'
+                  ? 'followStale'
+                  : 'followStopped',
+            )}
+          </span>
         </div>
       )}
 
@@ -783,13 +845,13 @@ export function MapScreen({ onLeave }: { onLeave: () => void }) {
           }}
           style={{
             position: 'absolute',
-            top: 'calc(max(16px, env(safe-area-inset-top)) + 110px)',
+            bottom: 'calc(112px + env(safe-area-inset-bottom))',
             left: '50%',
             transform: 'translateX(-50%)',
-            zIndex: 40,
-            height: 40,
-            padding: '0 16px',
-            borderRadius: 20,
+            zIndex: 46,
+            height: 42,
+            padding: '0 18px',
+            borderRadius: 21,
             border: 'none',
             cursor: 'pointer',
             background: tokens.self,
@@ -797,21 +859,86 @@ export function MapScreen({ onLeave }: { onLeave: () => void }) {
             fontFamily: 'inherit',
             fontSize: 13.5,
             fontWeight: 700,
-            boxShadow: '0 4px 14px rgba(0,0,0,0.2)',
+            boxShadow: '0 6px 20px rgba(0,0,0,0.24)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            whiteSpace: 'nowrap',
           }}
         >
-          {t('followResume', { name: followInfo.name })}
+          <Icon name="recenter" size={17} strokeWidth={2.2} />
+          {t('followRecenter')}
         </button>
       )}
 
-      {/* floating actions */}
+      {/* follow controls: two explicit camera modes + exit */}
+      {followInfo && (
+        <div
+          style={{
+            position: 'absolute',
+            left: 12,
+            right: 12,
+            bottom: 'calc(58px + env(safe-area-inset-bottom))',
+            zIndex: 46,
+            display: 'flex',
+            gap: 8,
+            alignItems: 'center',
+          }}
+        >
+          <FollowModeButton
+            active={followMode === 'track'}
+            activeColor={tokens.self}
+            icon="nav"
+            label={t('followSelf')}
+            onClick={() => {
+              haptics.tap();
+              setFollowMode('track');
+            }}
+          />
+          <FollowModeButton
+            active={followMode === 'trackBoth'}
+            activeColor="#7c3aed"
+            icon="fitAll"
+            label={t('followViewBoth')}
+            onClick={() => {
+              haptics.tap();
+              setFollowMode('trackBoth');
+            }}
+          />
+          <button
+            type="button"
+            onClick={stopFollow}
+            aria-label={t('followStop')}
+            style={{
+              width: 52,
+              height: 52,
+              flexShrink: 0,
+              borderRadius: 16,
+              border: 'none',
+              cursor: 'pointer',
+              background: 'rgba(255,255,255,0.94)',
+              color: tokens.danger,
+              backdropFilter: 'blur(14px)',
+              WebkitBackdropFilter: 'blur(14px)',
+              boxShadow: '0 4px 16px rgba(0,0,0,0.16)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <Icon name="close" size={20} strokeWidth={2.4} />
+          </button>
+        </div>
+      )}
+
+      {/* floating actions — the follow controls replace them while following */}
       <div
         style={{
           position: 'absolute',
           right: 12,
           bottom: 248,
           zIndex: 40,
-          display: 'flex',
+          display: followInfo ? 'none' : 'flex',
           flexDirection: 'column',
           gap: 10,
         }}
@@ -1079,6 +1206,66 @@ function RallyNameDialog({
 /** Shortest signed angular distance from `current` to `target`, in (-180, 180]. */
 function shortestAngleDelta(target: number, current: number): number {
   return ((target - current + 540) % 360) - 180;
+}
+
+/**
+ * Turn a relative bearing into the phrase you'd actually say out loud. Eight
+ * sectors: precise enough to act on, coarse enough to read at a glance.
+ */
+function directionWord(
+  relative: number,
+): 'dirAhead' | 'dirFrontRight' | 'dirRight' | 'dirBackRight' | 'dirBack' | 'dirBackLeft' | 'dirLeft' | 'dirFrontLeft' {
+  const a = Math.abs(relative);
+  const right = relative > 0;
+  if (a < 22.5) return 'dirAhead';
+  if (a < 67.5) return right ? 'dirFrontRight' : 'dirFrontLeft';
+  if (a < 112.5) return right ? 'dirRight' : 'dirLeft';
+  if (a < 157.5) return right ? 'dirBackRight' : 'dirBackLeft';
+  return 'dirBack';
+}
+
+/** One of the two big camera-mode buttons at the bottom of the follow view. */
+function FollowModeButton({
+  active,
+  activeColor,
+  icon,
+  label,
+  onClick,
+}: {
+  active: boolean;
+  activeColor: string;
+  icon: IconName;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        flex: 1,
+        height: 52,
+        borderRadius: 16,
+        border: 'none',
+        cursor: 'pointer',
+        background: active ? activeColor : 'rgba(255,255,255,0.94)',
+        color: active ? '#fff' : tokens.ink,
+        fontFamily: 'inherit',
+        fontSize: 14.5,
+        fontWeight: 700,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 8,
+        backdropFilter: 'blur(14px)',
+        WebkitBackdropFilter: 'blur(14px)',
+        boxShadow: '0 4px 16px rgba(0,0,0,0.16)',
+      }}
+    >
+      <Icon name={icon} size={18} strokeWidth={2.3} />
+      {label}
+    </button>
+  );
 }
 
 /** Compact "how long ago" for the follow bar when the target's fix went stale. */

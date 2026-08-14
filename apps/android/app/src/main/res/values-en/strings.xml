@@ -82,4 +82,27 @@
     <string name="follow">Follow</string>
     <string name="follow_stop">Stop following</string>
     <string name="follow_resume">Resume following %1$s</string>
+    <string name="follow_apart">Apart</string>
+    <string name="follow_off_screen">off screen</string>
+    <string name="follow_target_at">They are %1$s</string>
+    <string name="follow_updated_ago">%1$s ago</string>
+    <string name="follow_moving">Moving</string>
+    <string name="follow_stopped">Stopped</string>
+    <string name="follow_stale">Stale</string>
+    <string name="follow_self">Follow me</string>
+    <string name="follow_view_both">View both</string>
+    <string name="follow_recenter">Recenter on me</string>
+    <string name="follow_back_in">Back to follow in %1$ds</string>
+    <string name="follow_walk">Walking</string>
+    <string name="follow_bike">Cycling</string>
+    <string name="follow_city">City driving</string>
+    <string name="follow_hwy">Highway</string>
+    <string name="dir_ahead">straight ahead</string>
+    <string name="dir_front_right">ahead-right</string>
+    <string name="dir_right">to your right</string>
+    <string name="dir_back_right">behind-right</string>
+    <string name="dir_back">behind you</string>
+    <string name="dir_back_left">behind-left</string>
+    <string name="dir_left">to your left</string>
+    <string name="dir_front_left">ahead-left</string>
 </resources>

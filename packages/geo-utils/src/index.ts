@@ -164,6 +164,83 @@ export function zoomForMeters(lat: number, meters: number, pixels: number): numb
   return Math.log2((156543.03392 * Math.cos(toRad(lat)) * pixels) / meters);
 }
 
+/** The zoom at which one screen pixel covers `mpp` meters of ground. */
+export function zoomForMpp(lat: number, mpp: number): number {
+  return zoomForMeters(lat, mpp, 1);
+}
+
+export type FollowRegimeKey = 'walk' | 'bike' | 'city' | 'hwy';
+
+export interface FollowRegime {
+  key: FollowRegimeKey;
+  /** Ground distance from you to the top of the screen, in meters. */
+  rangeM: number;
+  /** Lower speed bound (m/s) this regime covers. */
+  minSpeed: number;
+}
+
+/**
+ * Follow mode's road scale is set by *your own speed*, not by how far away your
+ * friend is (design: 追踪视角). Walking you want the next few streets; on the
+ * highway you want the next few kilometers. Holding the scale steady is what makes
+ * the view readable — chasing the target's distance with the zoom does not.
+ */
+export const FOLLOW_REGIMES: readonly FollowRegime[] = [
+  { key: 'walk', rangeM: 250, minSpeed: 0 },
+  { key: 'bike', rangeM: 600, minSpeed: 3 },
+  { key: 'city', rangeM: 1100, minSpeed: 8 },
+  { key: 'hwy', rangeM: 2800, minSpeed: 18 },
+];
+
+/**
+ * Pick the road scale for a ground speed. `prev` adds hysteresis: speed hovering on
+ * a boundary would otherwise flip the scale back and forth every packet, so we only
+ * leave the current regime once the speed is clearly outside it.
+ */
+export function followRegime(speedMps: number, prev?: FollowRegimeKey): FollowRegime {
+  const speed = Number.isFinite(speedMps) && speedMps > 0 ? speedMps : 0;
+  let index = 0;
+  for (let i = FOLLOW_REGIMES.length - 1; i >= 0; i--) {
+    if (speed >= FOLLOW_REGIMES[i].minSpeed) {
+      index = i;
+      break;
+    }
+  }
+  if (prev === undefined) return FOLLOW_REGIMES[index];
+
+  const prevIndex = FOLLOW_REGIMES.findIndex((r) => r.key === prev);
+  if (prevIndex < 0 || prevIndex === index) return FOLLOW_REGIMES[index];
+  // Require a 25% overshoot past the boundary before changing scale.
+  if (index > prevIndex) {
+    return speed >= FOLLOW_REGIMES[prevIndex + 1].minSpeed * 1.25
+      ? FOLLOW_REGIMES[index]
+      : FOLLOW_REGIMES[prevIndex];
+  }
+  return speed <= FOLLOW_REGIMES[prevIndex].minSpeed * 0.75
+    ? FOLLOW_REGIMES[index]
+    : FOLLOW_REGIMES[prevIndex];
+}
+
+/**
+ * Where the ray from `origin` along `(dx, dy)` leaves the rectangle, and how many
+ * pixels away that is. Follow mode uses it twice: to know how much room the target
+ * has before it falls off screen, and to park the edge indicator on that boundary.
+ */
+export function rayExit(
+  origin: { x: number; y: number },
+  dx: number,
+  dy: number,
+  rect: { left: number; top: number; right: number; bottom: number },
+): { x: number; y: number; distance: number } {
+  let s = Infinity;
+  if (dx > 1e-6) s = Math.min(s, (rect.right - origin.x) / dx);
+  if (dx < -1e-6) s = Math.min(s, (rect.left - origin.x) / dx);
+  if (dy > 1e-6) s = Math.min(s, (rect.bottom - origin.y) / dy);
+  if (dy < -1e-6) s = Math.min(s, (rect.top - origin.y) / dy);
+  if (!Number.isFinite(s) || s < 0) s = 0;
+  return { x: origin.x + dx * s, y: origin.y + dy * s, distance: s };
+}
+
 /**
  * The point `meters` away from `from` along `bearingDeg` (0 = north, clockwise).
  * Used to nudge the follow-mode camera center along the *screen* axis so the

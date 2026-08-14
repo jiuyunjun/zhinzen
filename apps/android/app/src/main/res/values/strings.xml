@@ -83,4 +83,27 @@
     <string name="follow">追踪</string>
     <string name="follow_stop">退出追踪</string>
     <string name="follow_resume">恢复追踪 %1$s</string>
+    <string name="follow_apart">相距</string>
+    <string name="follow_off_screen">在屏幕外</string>
+    <string name="follow_target_at">对方在你%1$s</string>
+    <string name="follow_updated_ago">%1$s前更新</string>
+    <string name="follow_moving">移动中</string>
+    <string name="follow_stopped">已停止</string>
+    <string name="follow_stale">位置过期</string>
+    <string name="follow_self">跟随自己</string>
+    <string name="follow_view_both">查看两人</string>
+    <string name="follow_recenter">回到我的位置</string>
+    <string name="follow_back_in">%1$d秒后回到跟随</string>
+    <string name="follow_walk">步行</string>
+    <string name="follow_bike">骑行</string>
+    <string name="follow_city">城市驾车</string>
+    <string name="follow_hwy">高速</string>
+    <string name="dir_ahead">正前方</string>
+    <string name="dir_front_right">右前方</string>
+    <string name="dir_right">右侧</string>
+    <string name="dir_back_right">右后方</string>
+    <string name="dir_back">正后方</string>
+    <string name="dir_back_left">左后方</string>
+    <string name="dir_left">左侧</string>
+    <string name="dir_front_left">左前方</string>
 </resources>

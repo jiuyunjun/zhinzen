@@ -5,6 +5,175 @@
 
 ---
 
+## 2026-08-14 — 追踪模式续航与干净度四项优化（web 已部署 + APK）✅
+
+骑行是最怕耗电的场景,而追踪模式恰恰把三个高频消耗同时开着。四项都做了:
+
+**1) 相机驱动器会自己停下**。原来只要在追踪就 60fps 不停写相机(即使两人静止、方向已稳)。
+现在每帧判定 `settled`(bearing 差 <0.05°、位置差 <1e-7°≈1cm、zoom 差 <0.002)→ **完全不碰地图**;
+web 再进一步:连续 60 帧 settled 就 `cancelAnimationFrame` **停掉循环**,由
+`wakeDriverRef` 在(位置/缩放目标变化、`deviceHeading` 变化)时唤醒。等红灯时基本降到 0。
+android 用 `withFrameNanos` 循环,保持 tick 但跳过写入(跳过的是地图重绘,即大头)。
+
+**2) GPS 航向生效时停掉罗盘**。`updateCompass()` 原来只看 `followTarget != null`,
+但速度 ≥3m/s 时用的是 GPS course,罗盘读数**根本不参与计算**——白耗 `SENSOR_DELAY_GAME`
+的 rotation-vector,还会白弹「画 8 字校准」。现在 `gpsHeading != null` 时不因追踪/heading-up
+而开罗盘;`rebuildMembers` 里检测到可用性翻转才重新评估(避免频繁 start/stop)。
+**web 未做**:iOS Safari 的 `DeviceOrientationEvent.requestPermission()` 需要用户手势,
+停掉后再想恢复有风险,收益也小(deviceorientation 远比 rotation-vector 便宜)。
+
+**3) 追踪期间不再拉轨迹**。web `trackDeviceId` 在 track/trackBoth 下置 null;
+android `selectMember`/`rebuildMembers` 的取轨迹都 gate 在 `isFollowingLive` 上,
+`startFollow` 时清空已有轨迹。骑行中 sheet 是收起的,轨迹既看不到又要 15s 一轮询 + 重建 polyline。
+
+**4) HUD 的「x 前更新」现在会自己走秒**。原来只在成员列表变化时重算——房间里只有你俩、
+对方又掉线时,这个时间会**停住不动**,看起来像还在更新。两端各加 1s ticker(仅追踪期间)。
+
+**验证**:web build ✅ 已部署;android `assembleDebug` ✅,APK 已更新。
+
+---
+
+## 2026-08-14 — 详情面板：追踪 + 导航并排一行（web 已部署 + APK）✅
+
+按用户要求,把「◎ 追踪」从详情顶部挪到**原导航按钮那一行**,左右布局:左=追踪(实心主色)、
+右=导航(淡色次级,android 用 `OutlinedButton`)。成员详情与集结点详情都改。
+android 侧 `FollowButton` 加 `modifier` 参数(改为 `weight(1f)` 而非 `fillMaxWidth`),
+`OtherDetail` 新增 `following`/`onToggleFollow` 两个参数,`MemberDetail` 不再单独渲染它。
+两端按钮统一 52dp/46px 高。
+
+**验证**:web build ✅ 已部署;android `assembleDebug` ✅,APK 已更新。
+
+---
+
+## 2026-08-14 — 修安卓地图不跟着转 + 「查看两人」改成无限时实时取景（web 已部署 + APK）✅
+
+**1) 安卓跟随时地图不随方向转动（bug，重要教训）**
+根因:改成每帧驱动器后,`followHeading` 是**协程启动时捕获的值**,而它不在 `LaunchedEffect`
+的 key 里 → 罗盘再变,循环里读到的永远是启动那一刻的值(常常是 null,于是完全不转)。
+修:`rememberUpdatedState` 包住 `followHeading` / `followLat` / `followLng`,循环读 `.value`。
+**教训:长生命周期的 `LaunchedEffect` 里读到的任何参数都是快照,要么进 key,要么
+`rememberUpdatedState`。** (web 无此问题:`headingTargetRef` 在每次 render 赋值。)
+另:web 侧确认 `VITE_MAPS_MAP_ID` 已配置,矢量底图可旋转。
+
+**2) 「查看两人」按用户要求改**
+- **取消 8 秒自动返回**(以及倒计时 UI / `FOLLOW_BOTH_SECONDS`),一直保持到用户切回「跟随自己」。
+- **不再把自己钉在底部锚点**:改为中心取**两人中点**、缩放刚好框住两人,并**持续重新取景**。
+  实现:`desired.centered` 标志,为真时相机中心不做 anchor 偏移;缩放按 north-up 下的
+  lat/lng 跨度算(north-up 让普通经纬包围盒重新成立)`max(北向米/可用高, 东向米/可用宽)`。
+  仍复用 zoom 死区避免抖动。
+
+**验证**:web build ✅ 已部署;android `assembleDebug` ✅,APK 已更新。
+
+---
+
+## 2026-08-14 — 删掉自绘覆盖层，改用 Maps SDK 原生 marker/polyline（web 已部署 + APK）✅
+
+用户:「UI 太狗屎了…能用 google map sdk 支持的打标签/画标记方式就用原生的」。照做,并且这
+同时根治了连日来的对不齐问题。
+
+**删除**:`apps/web/.../FollowLayer.tsx` 与 `apps/android/.../FollowOverlay.kt` 整个删掉
+(自绘投影的箭头/连线/标签卡/边缘指示胶囊/比例尺条)。它必须假设"自己就在锚点上""地图确实
+按我要求转了"——而这两条随时不成立(raster 底图不能转、zoom 被钳、缓动没跟上、android 的
+zoom 按 dp 定义)。**教训:能交给 SDK 投影的就别自己算。**
+
+**改用原生**:
+- **自己的箭头**:追踪时把自己的 marker 换成箭头图标并旋转。android
+  `Marker(flat = true, rotation = 航向)`(flat marker 随地图转,rotation 直接给世界航向,
+  新增 `rememberArrowDescriptor()` 画 bitmap);web `Symbol.rotation` 是**屏幕空间**的,
+  所以传 `航向 − map.getHeading()`(course-up 时自然为 0)。web 侧箭头不再叠首字母 label。
+- **连线**:原生 Polyline。android `pattern = listOf(Dash, Gap)`;
+  web 用 `strokeOpacity: 0` + `icons` 重复短划线实现虚线。
+- **对方**:就用已有的成员 marker,不再隐藏、不再重画。
+- **是否跑出视口**:web `map.getBounds().contains()` / android
+  `cameraPositionState.projection.visibleRegion.latLngBounds.contains()`,
+  结果只在顶部 HUD 追加一句「在屏幕外」,**边缘指示胶囊取消**。
+
+**验证**:web build ✅ 已部署;android `assembleDebug` ✅,APK 已更新。
+
+---
+
+## 2026-08-14 — 追踪中手动缩放：能缩了，且缩放=暂停跟随（web 已部署 + APK）✅
+
+用户反馈:跟随时无法缩放。根因——每帧驱动器都在写 zoom,用户捏合当场被覆盖。
+按用户要求改成:**手动缩放 = 交还相机(暂停)**,再点「跟随自己」回来。
+
+- **web**:捏合/滚轮缩放**不触发 `dragstart`**(所以之前只有拖动能暂停)。新增
+  `appliedZoomRef` 记录驱动器刚写入的 zoom,`zoom_changed` 里比对 `map.getZoom()`,
+  差 >0.05 判定为用户操作 → `onUserPan()`。
+- **android**:把「暂停」从只看 `isMoving` 的 effect 挪进**每帧驱动器**——
+  检测到 `cameraMoveStartedReason == GESTURE` 就直接 `onPauseFollow()`,
+  否则手势结束后下一帧又把相机抢回去。
+- **两端**:进入 `Paused` 后驱动器**整个停写**(连 bearing 也不写),否则用户转/缩会被每帧纠正。
+
+**验证**:web build ✅ 已部署;android `assembleDebug` ✅,APK 已更新。
+
+---
+
+## 2026-08-14 — 追踪覆盖层修 4 个定位 bug：一律用「地图真实相机」反算（web 已部署 + APK）✅
+
+用户反馈上一版「完全不行,自己位置不准,连线和 mark 很随意」。全是**定位数学错误**,不是调参。
+
+**根因:覆盖层擅自假设「自己一定被画在锚点上、地图一定按模型旋转了」。**
+只要地图实际没照做,自己/连线/标签就整体错位。四个具体 bug:
+
+1. **安卓把 dp 当成了 px**(影响最大)。Maps 的 zoom 是按 **256dp 瓦片**定义的,
+   `metersPerPixel` 其实是"米/dp"。原来用物理像素算 → 3x 屏上比例尺差约 **1.6 个 zoom 级**、
+   距离换算差 **3 倍**。修:相机取景与投影全部改用 dp(`toDp().value`),画的时候再 ×density。
+2. **web 没配 vector Map ID 时地图根本不能旋转**,但覆盖层仍按罗盘角度算屏幕方向 → 全错。
+   修:`mapsMapId` 为空时把模型 heading 也钉成 0,模型与现实一致。
+3. **覆盖层改为从地图的真实相机反算**:不再"自己 = 锚点",而是
+   `project(p) = 屏幕中心 + 旋转(p 相对相机中心的向量)`,相机 center/zoom/bearing 每 50ms
+   从 `map.getCenter()/getZoom()/getHeading()`(安卓 `cameraPositionState.position`)**读回来**。
+   地图钳了 zoom、拒了 heading、缓动没跟上——覆盖层都照样对齐。连线也改成 selfPt→targetPt。
+4. **web 追踪时的「自己」会回退成别人**:`focusLocation = selfLocation ?? pins[0]`,
+   自己的实时位置还没回显时 `pins[0]` 可能是**另一个成员** → 相机跟着别人跑。
+   修:追踪路径改用只认自己的 `selfLat/selfLng`,拿不到就不进入追踪相机(安卓本来就是对的)。
+
+**验证**:typecheck + web build ✅ **已部署**;android `assembleDebug` ✅,APK 已更新。
+⚠️ 仍需真机确认。若还有偏移,下一步查 Maps 是否对该设备应用了额外 contentPadding。
+
+---
+
+## 2026-08-14 — 追踪视角（Follow view）设计落地：速度定比例尺 + 边缘指示（web 已部署 + APK）✅
+
+来源:Claude Design 项目 `Zhinzen 追踪视角`(`follow-view.jsx` / `follow-app.jsx`),
+经 DesignSync MCP 读取后糅进现有 app。design.md §5.10 已按新设计重写。
+
+**核心变化(最重要的一条)**:**比例尺由「自己的速度」决定,不再由「两人距离」决定。**
+- 档位:步行 250m / 骑行 600m / 城市驾车 1.1km / 高速 2.8km(锚点→屏幕顶端的地面距离),
+  带 **25% 滞回**防边界抖动换档。`geo-utils` 新增 `FOLLOW_REGIMES` + `followRegime()`,
+  android 镜像在 `data/Geo.kt`。
+- `<300m` 才允许适当拉远把对方框进来;`≥300m` **比例尺纹丝不动**,对方跑出屏幕交给
+  **边缘指示胶囊**。这才是"手感"的正解——为了追 2km 外的人而缩小地图,等于把你正在导航的
+  比例尺丢掉。
+- 新增 `zoomForMpp()`、`rayExit()`(射线与安全区边界求交,两端各一份)。
+- 锚点 0.62 → **0.65**;zoom 上限 17.5 → 18;死区 0.35 → 0.2。
+
+**新的覆盖层**(web `features/map/FollowLayer.tsx`,android `ui/screens/FollowOverlay.kt`):
+按相机模型算屏幕坐标绘制,**不是地图 marker**——因为对方跑出视口后仍要被表示。包含:
+自己的 course-up 箭头(+光晕+前方光锥)、你→对方的虚线、视口内的标签卡(名字/距离·ETA/状态)、
+视口外的边缘指示胶囊、比例尺条+档位标签。追踪期间**隐藏你和目标的普通 marker**避免重画。
+相机每帧驱动器以 **~20fps** 把 (lat,lng,zoom,bearing) 发布给覆盖层(不是每帧,省重绘)。
+
+**新 UI**:顶部 HUD(大箭头 + `相距 420 m` + 「对方在你右前方 · 8s前更新」+ 状态标签);
+底部两个显式相机模式 +「✕」——「跟随自己」/「查看两人」(**north-up,8 秒后自动回到跟随**,
+按钮上倒计时,因为它把 road scale 丢掉了),追踪期间右侧 FAB 列隐藏。
+拖动 → 暂停 + 「回到我的位置」胶囊。八向方位词(正前方/右前方/…)两端各一套 strings。
+
+**结构**:web `followGeometry.ts` 单独放锚点/安全区,**避免 GoogleMapView ↔ FollowLayer 循环
+import**;android `FollowCamera` 枚举(Follow/Both/Paused)取代 `followPaused` 布尔,
+`FollowState`(Moving/Stopped/Stale)进 VM。
+
+**踩坑**:①Kotlin `fun setFollowCamera` 与属性 setter **JVM 签名冲突** → 改名
+`updateFollowCamera`(与当年 `updateSharing` 同一个坑)。②Compose `Canvas` 里参数名叫 `size`
+会遮蔽 `DrawScope.size` → 改 `iconSize`。
+
+**验证**:typecheck + web build ✅ **已部署**;android `assembleDebug` ✅,APK 已更新。
+⚠️ 未真机验证。最可能要调:`FOLLOW_REGIMES` 的四个 range、`ANCHOR_FRAC=0.65`、
+`HOLD_BOTH_M=300`。设计稿里的「距离扩大提醒」**按用户先前决定不做**。
+
+---
+
 ## 2026-08-13 — 追踪模式返工：以我为旋转圆心 + 每帧驱动 + 永不自动解除（web 已部署 + APK）✅
 
 真机反馈两个问题:「手感太怪」+「点追踪后过几秒自己解除」。都修了,design.md §5.10 已同步改写。

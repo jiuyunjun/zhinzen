@@ -696,24 +696,46 @@ followMode:   'self' | 'free' | 'track' | 'trackPaused'
 
 #### 相机算法（关键）
 
-**以「我」为锚点。** 相机中心跟着**我**走,我被钉在屏幕**中央偏下**的固定点上
-(`ANCHOR_FRAC = 0.62`,即可用区域从上往下 62% 处),缩放则大到"对方落在我周围的可视半径内"。
+**以「我」为锚点,比例尺由「我的速度」决定。**
+相机中心跟着**我**走,我被钉在屏幕固定点上(`ANCHOR_FRAC = 0.65`,即从上往下 65%、
+距底部 35% 处)。
 
-> 早期版本把相机中心设为**两人中点**,结果:地图绕相机中心旋转 → **我自己在屏幕上公转**,
-> 对方一动我就在屏幕里滑来滑去,极其晕。旋转圆心必须是我。
+**road scale(道路比例尺)按自己的速度分档,不随两人距离变化**:
+
+| 档位 | 速度下限 | 视野(锚点→屏幕顶端) |
+| --- | --- | --- |
+| 步行 walk | 0 | 250 m |
+| 骑行 bike | 3 m/s | 600 m |
+| 城市驾车 city | 8 m/s | 1100 m |
+| 高速 hwy | 18 m/s | 2800 m |
+
+档位切换带 **25% 滞回**(速度在边界抖动会来回换档,画面就一直跳)。
+
+**距离分段**:
+- `< 300m`(`HOLD_BOTH_M`):可以适当拉远,把对方也框进来(顺手,不损失什么);
+- `≥ 300m`:**比例尺不动**。对方跑出屏幕就交给**边缘指示条**,绝不为了追一个 2km 外的人
+  把你正在导航的比例尺丢掉——这是「追踪视角」最核心的一条。
+
+> 更早的版本用「两人距离」决定缩放、相机中心取**两人中点**,两个错都犯了:地图绕相机中心
+> 旋转 → **我自己在屏幕上公转**;对方一走远画面就无限缩小。旋转圆心必须是我,比例尺必须稳。
 
 「朝向跟着转」和「框住两个人」还会在另一处打架:`fitBounds`(web)/`newLatLngBounds`(android)
 算的是**正北向包围盒**,地图一旦带 bearing 旋转这个盒子就不成立,且 `fitBounds` 会重置 heading。
-**所以追踪模式不用 fitBounds,自行算相机**——用**以我为心的圆**,对旋转天然不变:
+**所以追踪模式不用 fitBounds,自行算相机**:
 
 ```
-radiusPx = min(usableW/2, anchor 到可用区上边距, anchor 到下边距)   // 最近边界
-needM    = haversine(me, target) + MARGIN_M(40)                    // 半径,不是直径
-zoom     = clamp(zoomForMeters(myLat, needM, radiusPx), 13, 17.5)
+anchor   = (viewW/2, viewH * 0.65)
+forward  = anchor.y                                   // 锚点到屏幕顶端的像素
+baseMpp  = regime.rangeM / forward                    // 米/像素,由速度档位决定
+mpp      = d < 300m ? max(baseMpp, d / (exit.distance*0.85)) : baseMpp
+zoom     = clamp(zoomForMpp(myLat, mpp), 13, 18)
 center   = 从「我」沿**当前 bearing**(屏幕向上)前移 offsetPx 像素
-           offsetPx = anchorY - viewH/2 (我在中心下方多少像素)
+           offsetPx = anchor.y - viewH/2
 bearing  = 见下「朝向来源」
 ```
+
+`exit` = 从锚点沿「指向对方」的方向射线打到**安全区**边界的交点(`rayExit`),安全区 =
+视口去掉顶部 HUD(150dp)与底部模式按钮(200dp)、左右各 26dp。
 
 **`center` 必须每帧用当前 bearing 重算** —— 转向时相机中心要绕着我公转,才能把我钉在锚点上。
 只在位置更新时(约 1s)算一次是不够的,那正是"我在屏幕里乱跑"的另一半原因。
@@ -753,14 +775,40 @@ speed >= 3 m/s (≈11km/h) 且 heading != null → 用 GPS heading
 
 仅在回落到罗盘且精度低时才显示「画 8 字校准」横幅(移动中不提示)。
 
-#### UI
+#### UI（追踪视角）
 
-- **入口**:成员详情 / 集结点详情顶部主按钮「◎ 追踪」。**点头像的行为不变**(选中+聚焦)。
-- **追踪顶栏条**(一行、大字,骑行可扫读):`◎ 小明   320 m   ↑ 前方偏右 30°  ✕`。
-  已 heading-up,故箭头即"往那边看";复用详情里已有的连续角+动画防绕圈。
-  **退出**就是这条上的 ✕(比换 FAB 更好找;heading-up 期间 compass FAB 保持原样可用)。
-- **暂停胶囊**:`trackPaused` 时顶栏条下方出现「恢复追踪 X」,一点即回。
-- **recenter / fitAll FAB**:追踪中点它们 → 进 `trackPaused`(不退出)。
+- **入口**:成员详情 / 集结点详情里,「◎ 追踪」与「导航」**并排一行**(左=追踪,右=导航),
+  就在原来导航按钮的位置——这是对一个人真正会做的两件事:实时跟着他,或交给逐向导航。
+  追踪为实心主色、导航为淡色次级。**点头像的行为不变**(选中+聚焦)。
+- **地图上的东西一律用 Maps SDK 原生对象画,不要手写屏幕坐标覆盖层。**
+
+  > 曾经写过一个自绘覆盖层(自己算投影画箭头/连线/标签卡/边缘指示),结果既难看又**始终对不齐**
+  > ——它必须假设"自己就在锚点上""地图确实按我要求转了",而这两条随时会不成立(raster 底图
+  > 不能旋转、zoom 被钳、缓动没跟上、android 的 zoom 按 **dp** 而非 px 定义)。已全部删除。
+  > 教训:**能交给 SDK 投影的,就别自己算**。
+
+  - **自己**:普通 marker,追踪时换成**箭头图标并旋转**——
+    android `Marker(flat = true, rotation = 航向)`(flat marker 跟着地图转,rotation 就是世界航向);
+    web `Symbol` 的 `rotation` 是屏幕空间的,所以传 `航向 − 地图 heading`(course-up 时自然为 0)。
+  - **连线**:原生 **Polyline**(android `pattern = Dash+Gap`;web `icons` 虚线 + `strokeOpacity:0`)。
+  - **对方**:就用已有的成员 marker,不特殊处理。
+  - **对方是否跑出视口**:用 SDK 自己的视野——web `map.getBounds().contains()`,
+    android `cameraPositionState.projection.visibleRegion.latLngBounds.contains()`,
+    结果只用来在顶部 HUD 上加一句「在屏幕外」,**不再画边缘指示胶囊**。
+- **顶部 HUD**(一行答完"哪边、多远"):大箭头 + `相距 **420** m` + 「对方在你右前方 · 8s前更新」
+  + 状态标签(移动中 / 已停止 / 位置过期)。
+- **底部两个显式相机模式 + 退出**:
+  - 「跟随自己」= 回到 course-up 锚定视角(也是拖动后的恢复按钮);
+  - 「查看两人」= **north-up 的实时取景**:中心取**两人中点**(不是锚点),缩放刚好框住两人,
+    并**随两人移动持续重新取景**;**没有时间限制**,一直保持到用户切回「跟随自己」。
+    north-up 让普通的经纬包围盒重新成立,所以这里直接按 lat/lng 跨度算 mpp 即可;
+  - `✕` 退出追踪。追踪期间右侧 FAB 列隐藏(这三个按钮已经覆盖其职责)。
+- **暂停**:**任何手动操作地图(拖动、双指缩放、旋转)→ `trackPaused`**,相机整个交还用户
+  (连 bearing 都不再写,否则用户转/缩会被每帧改回去),底部出现「回到我的位置」胶囊,
+  点它或「跟随自己」即恢复。
+  - web 上捏合缩放**不触发 `dragstart`**,靠比对「地图当前 zoom vs 我们刚写入的 zoom」
+    识别(差 >0.05 即判定为用户操作)。android 用 `cameraMoveStartedReason == GESTURE`,
+    并且是在**每帧驱动器里**判定+暂停(只靠 `isMoving` 的 effect 会漏,导致缩放被下一帧覆盖)。
 - **底部 sheet**:进入追踪自动收到 peek。
 
 #### 降级与边界
@@ -769,7 +817,8 @@ speed >= 3 m/s (≈11km/h) 且 heading != null → 用 GPS heading
 | --- | --- |
 | web 无 vector Map ID(`isMapRotatable()` false) | 追踪照常可用,只是地图不旋转;箭头改为"相对正北",提示一次 `rotateNeedsMapId` |
 | iOS Safari 无 DeviceOrientation 权限 | 静止时无朝向 → 用最后一次 GPS heading,再没有则锁正北 |
-| 距离 >30km | zoom 触底(13),对方可能落在视野外,顶栏距离仍然准 |
+| 对方跑出视口 | **不缩小地图**,改为边缘指示胶囊(方向+距离)。距离多远都成立 |
+| 距离极远 | zoom 由速度档位决定,与距离无关;HUD 距离始终准确 |
 | 目标 `sharingLocation=false` / 被踢 / 离线 | **不退出**,继续追最后已知位置 + 显示年龄(见上"两条硬规则") |
 | web 双指捏合缩放 | Maps JS 只有 `dragstart` 能可靠区分手势,捏合**不会**触发暂停(拖动会)。android 用 `cameraMoveStartedReason == GESTURE`,捏合也能暂停 |
 

@@ -48,6 +48,16 @@ enum class Phase { Onboarding, Room, Map }
 /** What follow mode is tracking: another member, or a rally point. */
 data class FollowTarget(val isRally: Boolean, val id: String)
 
+/**
+ * Follow-view camera (design.md §5.10). [Follow] is course-up and anchored on you;
+ * [Both] is the north-up "view both" excursion that hands itself back; [Paused] is
+ * the same session with the camera given to the user after they panned.
+ */
+enum class FollowCamera { Follow, Both, Paused }
+
+/** How the followed target is doing right now — worth telling apart while riding. */
+enum class FollowState { Moving, Stopped, Stale }
+
 // Low-battery alert thresholds (with hysteresis). Geofence radius is per rally point.
 private const val LOW_BATTERY_PCT = 15
 private const val BATTERY_RESET_PCT = 25
@@ -137,10 +147,15 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
      */
     var followTarget by mutableStateOf<FollowTarget?>(null)
         private set
-    /** True after the user panned the map: the session lives on, the camera doesn't. */
-    var followPaused by mutableStateOf(false)
+    /** Which follow camera is driving right now. The session outlives all of them. */
+    var followCamera by mutableStateOf(FollowCamera.Follow)
         private set
     private var headingUpBeforeFollow = false
+    private var lastGpsHeadingAvailable = false
+
+    /** True while the follow camera is actually driving (not paused). */
+    private val isFollowingLive: Boolean
+        get() = followTarget != null && followCamera != FollowCamera.Paused
     var roomHistory by mutableStateOf<List<RoomHistoryEntry>>(roomHistoryStore.list())
         private set
     /** Recent track points of the currently selected (other) member. */
@@ -228,7 +243,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         // Show a track only for the explicitly selected member — including yourself
         // when you tap your own avatar. Nothing selected → clear the track.
         val target = selectedDeviceId
-        if (target != null) {
+        if (target != null && !isFollowingLive) {
             fetchTrack(target)
         } else {
             trackPoints = emptyList()
@@ -415,9 +430,14 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun startFollow(target: FollowTarget) {
         if (followTarget == null) headingUpBeforeFollow = headingUp
         followTarget = target
-        followPaused = false
+        followCamera = FollowCamera.Follow
         headingUp = true
         haptics.light()
+        // Drop any track we were rendering — it isn't visible mid-ride and its polling
+        // would keep running behind the follow view.
+        trackPoints = emptyList()
+        trackTargetId = null
+        lastTrackCreatedAt = 0L
         refreshFollowInfo()
         updateCompass()
     }
@@ -425,7 +445,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun stopFollow() {
         if (followTarget == null) return
         followTarget = null
-        followPaused = false
+        followCamera = FollowCamera.Follow
         headingUp = headingUpBeforeFollow
         haptics.tap()
         refreshFollowInfo()
@@ -434,12 +454,17 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     /** The user grabbed the map: keep the session, hand back the camera. */
     fun pauseFollow() {
-        if (followTarget != null) followPaused = true
+        if (followTarget != null && followCamera == FollowCamera.Follow) {
+            followCamera = FollowCamera.Paused
+        }
     }
 
-    fun resumeFollow() {
+    // Named `update…` rather than `set…`: a `setFollowCamera` would clash with the
+    // JVM setter generated for the `followCamera` property (same trap as updateSharing).
+    fun updateFollowCamera(camera: FollowCamera) {
         if (followTarget == null) return
-        followPaused = false
+        if (followCamera == camera) return
+        followCamera = camera
         haptics.tap()
     }
 
@@ -457,6 +482,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     /** `updatedAt` of the fix behind [followPoint], or null for a rally point. */
     var followUpdatedAt by mutableStateOf<Long?>(null)
         private set
+    var followState by mutableStateOf(FollowState.Moving)
+        private set
 
     private fun refreshFollowInfo() {
         val target = followTarget
@@ -472,16 +499,27 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 followName = it.name
                 followUpdatedAt = null
             }
+            followState = FollowState.Stopped
         } else {
-            members.firstOrNull { it.member.deviceId == target.id }?.let { mv ->
-                followName = mv.member.displayName
-                mv.location?.let {
-                    followPoint = it.lat to it.lng
-                    followUpdatedAt = it.updatedAt
+            val mv = members.firstOrNull { it.member.deviceId == target.id }
+            mv?.let {
+                followName = it.member.displayName
+                it.location?.let { loc ->
+                    followPoint = loc.lat to loc.lng
+                    followUpdatedAt = loc.updatedAt
                 }
+            }
+            followState = when {
+                mv == null || mv.status != MemberStatus.ONLINE -> FollowState.Stale
+                (mv.location?.speed ?: 0.0) < 0.6 -> FollowState.Stopped
+                else -> FollowState.Moving
             }
         }
     }
+
+    /** Your own ground speed (m/s) — this, not the distance, sets the road scale. */
+    val ownSpeed: Double
+        get() = ownLocation?.speed ?: 0.0
 
     /**
      * Heading to point the map at: the GPS course over ground while actually moving,
@@ -502,11 +540,17 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             return if (loc.speed >= GPS_HEADING_MIN_SPEED_MPS) gps.toFloat() else null
         }
 
-    /** The compass runs while in heading-up mode or while pointing at another member. */
+    /**
+     * The compass runs while in heading-up mode or while pointing at another member —
+     * but *not* when follow mode is already steering by GPS course. Above walking pace
+     * the magnetometer's reading is unused, so keeping it registered only drains the
+     * battery and pops the figure-8 prompt for drift nobody is looking at.
+     */
     private fun updateCompass() {
+        val followNeedsCompass = followTarget != null && gpsHeading == null
         val wanted =
-            headingUp ||
-                followTarget != null ||
+            (headingUp && gpsHeading == null) ||
+                followNeedsCompass ||
                 (selectedDeviceId != null && selectedDeviceId != deviceId) ||
                 selectedRallyId != null
         if (wanted) startCompass() else stopCompass()
@@ -619,7 +663,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         haptics.tap()
         headingUp = false
         followTarget = null
-        followPaused = false
+        followCamera = FollowCamera.Follow
         headingUpBeforeFollow = false
         followPoint = null
         followName = null
@@ -845,11 +889,21 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 lastHistoryMembers = names
                 roomHistory = roomHistoryStore.updateMembers(rid, names)
             }
-            // Live-grow the active track (the selected member, if any) as positions come in.
+            // Live-grow the active track (the selected member, if any) as positions come
+            // in — but never while actively following: mid-ride you are watching the
+            // road, not a history trail, and the fetch + polyline rebuild is pure cost.
             val trackTarget = selectedDeviceId
-            if (trackTarget != null && System.currentTimeMillis() - lastTrackFetchAt > 10_000L) {
+            if (trackTarget != null && !isFollowingLive &&
+                System.currentTimeMillis() - lastTrackFetchAt > 10_000L
+            ) {
                 fetchTrack(trackTarget)
             }
+        }
+        // The compass is only worth running when GPS course isn't already steering.
+        val gpsNow = gpsHeading != null
+        if (gpsNow != lastGpsHeadingAvailable) {
+            lastGpsHeadingAvailable = gpsNow
+            updateCompass()
         }
         if (selectedDeviceId != null && views.none { it.member.deviceId == selectedDeviceId }) {
             selectMember(null)

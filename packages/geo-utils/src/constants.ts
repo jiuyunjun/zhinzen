@@ -28,9 +28,6 @@ export const DEFAULT_TRACK_GAP_BREAK_MS = 90_000;
  * camera feels identical on both.
  */
 
-/** Extra ground margin past the target so its pin never touches the edge. */
-export const DEFAULT_FOLLOW_MARGIN_M = 40;
-
 /** Never zoom out past this, even when the two are very far apart. */
 export const DEFAULT_FOLLOW_MIN_ZOOM = 13;
 
@@ -38,18 +35,28 @@ export const DEFAULT_FOLLOW_MIN_ZOOM = 13;
  * Never zoom in past this. Riding side by side (<30m apart) should not slam the
  * camera to street level, where the relative positions become unreadable.
  */
-export const DEFAULT_FOLLOW_MAX_ZOOM = 17.5;
+export const DEFAULT_FOLLOW_MAX_ZOOM = 18;
 
 /** Zoom dead zone: ignore smaller changes so the map doesn't "breathe". */
-export const DEFAULT_FOLLOW_ZOOM_EPSILON = 0.35;
+export const DEFAULT_FOLLOW_ZOOM_EPSILON = 0.2;
 
 /**
- * Where *you* sit inside the usable viewport, top 0 → bottom 1. Below center, so
- * there is more map ahead of you than behind — and, crucially, the camera center is
- * derived from this every frame, which is what keeps you pinned in place while the
- * world rotates around you instead of orbiting the screen center.
+ * Where *you* sit inside the viewport, top 0 → bottom 1: 35% up from the bottom, so
+ * most of the screen is the road ahead. The camera center is derived from this every
+ * frame, which is what keeps you pinned in place while the world rotates around you
+ * instead of orbiting the screen center.
  */
-export const DEFAULT_FOLLOW_ANCHOR_FRAC = 0.62;
+export const DEFAULT_FOLLOW_ANCHOR_FRAC = 0.65;
+
+/**
+ * Below this distance the camera may widen to hold the target on screen. Past it the
+ * road scale wins and an edge indicator takes over — zooming out to chase someone
+ * 2km away would throw away the scale you are actually navigating at.
+ */
+export const DEFAULT_FOLLOW_HOLD_BOTH_M = 300;
+
+/** Seconds "view both" stays on before snapping back to the follow camera. */
+export const DEFAULT_FOLLOW_BOTH_SECONDS = 8;
 
 /** Camera position/zoom easing time constant (ms); settles in roughly 3×. */
 export const DEFAULT_FOLLOW_CENTER_TAU_MS = 220;

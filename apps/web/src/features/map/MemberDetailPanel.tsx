@@ -86,9 +86,8 @@ function FollowButton({
       type="button"
       onClick={onToggle}
       style={{
-        width: '100%',
+        flex: 1,
         height: 46,
-        marginTop: 12,
         borderRadius: 14,
         border: following ? `1.5px solid ${withAlpha(accent, 0.4)}` : 'none',
         cursor: 'pointer',
@@ -354,14 +353,6 @@ function OtherPanel({
     <section>
       <PanelHeader name={name} accent={tokens.target} status={member.status} onClose={onClose} />
 
-      {onToggleFollow && (
-        <FollowButton
-          following={Boolean(following)}
-          onToggle={onToggleFollow}
-          accent={tokens.self}
-        />
-      )}
-
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 12 }}>
         <Metric
           label={t('distance')}
@@ -391,31 +382,41 @@ function OtherPanel({
         compassStatus={compassStatus}
       />
 
-      <button
-        type="button"
-        onClick={onNavigate}
-        disabled={!canNavigate}
-        style={{
-          width: '100%',
-          height: 44,
-          marginTop: 12,
-          borderRadius: 14,
-          border: 'none',
-          cursor: canNavigate ? 'pointer' : 'not-allowed',
-          background: canNavigate ? tokens.self : withAlpha(tokens.offline, 0.2),
-          color: canNavigate ? '#fff' : tokens.inkFaint,
-          fontFamily: 'inherit',
-          fontSize: 14,
-          fontWeight: 700,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: 8,
-        }}
-      >
-        <Icon name="nav" size={17} />
-        {t('navigate')}
-      </button>
+      {/* Follow and navigate are the two things you actually do with a person, so
+          they share one row: track them live, or hand off to turn-by-turn. */}
+      <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+        {onToggleFollow && (
+          <FollowButton
+            following={Boolean(following)}
+            onToggle={onToggleFollow}
+            accent={tokens.self}
+          />
+        )}
+        <button
+          type="button"
+          onClick={onNavigate}
+          disabled={!canNavigate}
+          style={{
+            flex: 1,
+            height: 46,
+            borderRadius: 14,
+            border: 'none',
+            cursor: canNavigate ? 'pointer' : 'not-allowed',
+            background: canNavigate ? withAlpha(tokens.self, 0.12) : withAlpha(tokens.offline, 0.2),
+            color: canNavigate ? tokens.self : tokens.inkFaint,
+            fontFamily: 'inherit',
+            fontSize: 14.5,
+            fontWeight: 700,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 8,
+          }}
+        >
+          <Icon name="nav" size={17} />
+          {t('navigate')}
+        </button>
+      </div>
 
       {onPoke && (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>
@@ -508,9 +509,6 @@ export function RallyDetailPanel({
   return (
     <section>
       <PanelHeader name={`📍 ${point.name}`} accent="#7c3aed" status="online" onClose={onClose} />
-      {onToggleFollow && (
-        <FollowButton following={Boolean(following)} onToggle={onToggleFollow} accent="#7c3aed" />
-      )}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 12 }}>
         <Metric
           label={t('distance')}
@@ -552,30 +550,34 @@ export function RallyDetailPanel({
         bearing={targetBearing}
         compassStatus={compassStatus}
       />
-      <button
-        type="button"
-        onClick={onNavigate}
-        style={{
-          width: '100%',
-          height: 44,
-          marginTop: 12,
-          borderRadius: 14,
-          border: 'none',
-          cursor: 'pointer',
-          background: '#7c3aed',
-          color: '#fff',
-          fontFamily: 'inherit',
-          fontSize: 14,
-          fontWeight: 700,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: 8,
-        }}
-      >
-        <Icon name="nav" size={17} />
-        {t('navigate')}
-      </button>
+      <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+        {onToggleFollow && (
+          <FollowButton following={Boolean(following)} onToggle={onToggleFollow} accent="#7c3aed" />
+        )}
+        <button
+          type="button"
+          onClick={onNavigate}
+          style={{
+            flex: 1,
+            height: 46,
+            borderRadius: 14,
+            border: 'none',
+            cursor: 'pointer',
+            background: 'rgba(124, 58, 237, 0.12)',
+            color: '#7c3aed',
+            fontFamily: 'inherit',
+            fontSize: 14.5,
+            fontWeight: 700,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 8,
+          }}
+        >
+          <Icon name="nav" size={17} />
+          {t('navigate')}
+        </button>
+      </div>
       {canEdit && (
         <button
           type="button"
