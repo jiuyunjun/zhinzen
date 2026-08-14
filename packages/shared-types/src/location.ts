@@ -39,14 +39,18 @@ export interface RallyPoint {
 }
 
 /**
- * A single recorded track point.
- * Firestore path: `rooms/{roomId}/tracks/{deviceId}/points/{pointId}` (design.md §6.2).
+ * A single recorded track point. RTDB path `tracks/{roomId}/{deviceId}/{pointId}`.
+ *
+ * Only lat/lng/speed/createdAt are written: rendering never used `accuracy` or
+ * `heading`, and `deviceId` is already in the path, so storing them was ~a third of
+ * the bytes for nothing. They stay optional here because points written by older
+ * clients still carry them.
  */
 export interface TrackPoint {
   lat: number;
   lng: number;
-  accuracy: number;
-  heading: number | null;
+  accuracy?: number;
+  heading?: number | null;
   speed: number;
   createdAt: Millis;
   expiresAt?: Millis;

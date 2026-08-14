@@ -42,7 +42,7 @@
         "$deviceId": {
           "$pointId": {
             ".write": "!data.exists() && newData.exists()",
-            ".validate": "newData.hasChildren(['deviceId', 'lat', 'lng', 'createdAt'])",
+            ".validate": "newData.hasChildren(['lat', 'lng', 'createdAt'])",
             "deviceId": { ".validate": "newData.val() === $deviceId" },
             "lat": { ".validate": "newData.isNumber() && newData.val() >= -90 && newData.val() <= 90" },
             "lng": { ".validate": "newData.isNumber() && newData.val() >= -180 && newData.val() <= 180" },

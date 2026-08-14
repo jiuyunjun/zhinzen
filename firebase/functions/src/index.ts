@@ -449,22 +449,37 @@ export const kickMember = onCall(async (request): Promise<{ ok: true }> => {
 });
 
 /**
- * Hourly cleanup: for rooms past their expiry, remove the RTDB live locations,
- * tracks, and UWB signaling, and mark the room expired. RTDB has no native TTL,
- * and rooms expire within 24h, so per-room deletion gives ~24h track retention.
+ * How long track points survive in a room that is still alive. The apps only ever
+ * read the last 24h, so anything older is pure storage cost; the extra day is slack
+ * so nothing a client is currently rendering disappears underneath it.
+ */
+const ACTIVE_ROOM_TRACK_RETENTION_MS = 48 * 60 * 60 * 1000;
+
+/** Rooms trimmed per run. Bounded so one invocation can't run away. */
+const ACTIVE_ROOM_PRUNE_LIMIT = 200;
+
+/**
+ * Hourly cleanup. Two jobs:
+ *
+ * 1. Rooms past their expiry: drop all their RTDB data and mark them expired.
+ * 2. Rooms that are still alive: trim track points older than
+ *    {@link ACTIVE_ROOM_TRACK_RETENTION_MS}. This one matters because `joinRoom`
+ *    slides the expiry out by 30 days on every join, so a room opened daily never
+ *    expires — and without this its `tracks/{roomId}` would grow without bound
+ *    forever, even though only the last 24h is ever read back.
  */
 export const pruneExpiredRooms = onSchedule('every 60 minutes', async () => {
   const now = Date.now();
-  const snapshot = await db
+  const rtdb = getDatabaseWithUrl(RTDB_URL, app);
+
+  const expired = await db
     .collection('rooms')
     .where('status', '==', 'active')
     .where('expiresAt', '<=', now)
     .limit(300)
     .get();
-  if (snapshot.empty) return;
 
-  const rtdb = getDatabaseWithUrl(RTDB_URL, app);
-  for (const doc of snapshot.docs) {
+  for (const doc of expired.docs) {
     const roomId = doc.id;
     await Promise.all([
       rtdb.ref(`liveLocations/${roomId}`).remove(),
@@ -475,7 +490,53 @@ export const pruneExpiredRooms = onSchedule('every 60 minutes', async () => {
     ]);
     await doc.ref.update({ status: 'expired' });
   }
+
+  const live = await db
+    .collection('rooms')
+    .where('status', '==', 'active')
+    .where('expiresAt', '>', now)
+    .limit(ACTIVE_ROOM_PRUNE_LIMIT)
+    .get();
+
+  const cutoff = now - ACTIVE_ROOM_TRACK_RETENTION_MS;
+  for (const doc of live.docs) {
+    // Device ids come from Firestore, not from listing `tracks/{roomId}` — the
+    // Node admin SDK has no shallow read, so listing that node would pull the whole
+    // track tree down every hour, which is the very cost this job exists to avoid.
+    const members = await doc.ref.collection('members').get();
+    for (const member of members.docs) {
+      await pruneDeviceTrack(rtdb, doc.id, member.id, cutoff);
+    }
+  }
 });
+
+/**
+ * Delete one device's track points older than `cutoff`. Point ids are
+ * `{createdAt}_{rand}`, and millisecond timestamps are fixed-width for the next few
+ * centuries, so ordering by key is chronological and `endAt` addresses exactly the
+ * old ones — no index needed, and only the doomed keys are read.
+ */
+async function pruneDeviceTrack(
+  rtdb: ReturnType<typeof getDatabaseWithUrl>,
+  roomId: string,
+  deviceId: string,
+  cutoff: number,
+): Promise<void> {
+  const stale = await rtdb
+    .ref(`tracks/${roomId}/${deviceId}`)
+    .orderByKey()
+    .endAt(`${cutoff}_`)
+    .once('value');
+
+  const removals: Record<string, null> = {};
+  stale.forEach((child) => {
+    if (child.key) removals[child.key] = null;
+    return false;
+  });
+  if (Object.keys(removals).length > 0) {
+    await rtdb.ref(`tracks/${roomId}/${deviceId}`).update(removals);
+  }
+}
 
 /**
  * @deprecated Track points are now written directly to RTDB by the clients

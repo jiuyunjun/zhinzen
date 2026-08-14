@@ -82,13 +82,13 @@ object Backend {
     suspend fun appendTrackPoint(identity: DeviceIdentity, roomId: String, loc: LiveLocation) {
         val createdAt = loc.updatedAt
         val pointId = "${createdAt}_${java.util.UUID.randomUUID().toString().take(6)}"
+        // Deliberately only four fields: deviceId is already in the path, and nothing
+        // has ever rendered accuracy/heading from a track point. RTDB bills storage
+        // and download, so those three were ~a third of the bytes for no benefit.
         val point =
             hashMapOf<String, Any?>(
-                "deviceId" to identity.deviceId,
                 "lat" to loc.lat,
                 "lng" to loc.lng,
-                "accuracy" to loc.accuracy,
-                "heading" to loc.heading,
                 "speed" to loc.speed,
                 "createdAt" to createdAt,
             )

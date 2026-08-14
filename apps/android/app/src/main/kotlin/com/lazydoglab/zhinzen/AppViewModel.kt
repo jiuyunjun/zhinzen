@@ -13,6 +13,7 @@ import com.google.firebase.database.ChildEventListener
 import com.google.firebase.database.DataSnapshot
 import com.google.firebase.database.DatabaseError
 import com.google.firebase.database.DatabaseReference
+import com.google.firebase.database.Query
 import com.google.firebase.database.ValueEventListener
 import com.google.firebase.firestore.ListenerRegistration
 import com.lazydoglab.zhinzen.data.Backend
@@ -67,6 +68,13 @@ private const val BATTERY_RESET_PCT = 25
  * magnetometer as a heading source — see design.md §5.10.
  */
 private const val GPS_HEADING_MIN_SPEED_MPS = 3.0
+
+/**
+ * How many recent pokes to attach to. Anything older than the subscription is
+ * discarded anyway, so this only has to be deep enough that a simultaneous burst
+ * isn't missed.
+ */
+private const val POKE_TAIL = 20
 
 /**
  * App state + backend orchestration. Mirrors the web's device/room/members/
@@ -180,7 +188,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private var liveListener: ValueEventListener? = null
     private var rallyRef: DatabaseReference? = null
     private var rallyListener: ValueEventListener? = null
-    private var pokeRef: DatabaseReference? = null
+    private var pokeRef: Query? = null
     private var pokeListener: ChildEventListener? = null
     private var pokeWatchStart = 0L
     private var compassJob: Job? = null
@@ -796,7 +804,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         rallyListener = rListener
 
         pokeWatchStart = System.currentTimeMillis()
-        val pRef = Backend.database.getReference("pokes/$roomId")
+        // Bounded to the tail on purpose: an unbounded child listener replays — and
+        // bills for — every poke the room has ever received, on every open, forever.
+        // push() keys are chronological, so limitToLast needs no .indexOn; ordering
+        // by createdAt instead would fall back to downloading the whole node.
+        val pRef = Backend.database.getReference("pokes/$roomId").limitToLast(POKE_TAIL)
         val pListener =
             object : ChildEventListener {
                 override fun onChildAdded(snapshot: DataSnapshot, previousChildName: String?) {

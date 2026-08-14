@@ -1004,9 +1004,19 @@ tracks/{roomId}/{deviceId}/{pointId}
 2. 自适应采样控制频率（移动≥12m / 20s 心跳 / 最短 2.5s，见 §5.4）。
 3. 安全规则校验字段格式 + `deviceId === $deviceId`；与 liveLocations 同等（无 deviceSecret 校验，
    见 §11.1 取舍）。需强校验可改回"经轻函数写"。
-4. **过期清理**：RTDB 无原生 TTL，用定时函数 **`pruneExpiredRooms`**（每 60 分钟）删除已过期房间的
-   `liveLocations/{roomId}`、`tracks/{roomId}`、`rooms/{roomId}`(uwb 信令) 并标记房间 expired。
-   房间 24h 过期 ⇒ 轨迹最长保留 ~24h。
+4. **清理（RTDB 无原生 TTL）**：定时函数 **`pruneExpiredRooms`**（每 60 分钟）做两件事：
+   - **已过期房间**：删 `liveLocations`/`tracks`/`rallyPoints`/`pokes`/`rooms(uwb)` 并标记 expired；
+   - **仍存活的房间**：删 `tracks/{roomId}/{deviceId}` 中早于 **48h** 的点。
+     这一条不能省——`joinRoom` 每次进房都把过期时间滑到 30 天后（§2.3 家人房间），
+     所以天天开的房间**永不过期**，没有这步它的轨迹会无限增长，而客户端只读最近 24h。
+     48h 是留给"客户端正在渲染 24h 窗口"的余量。
+   - 遍历设备用 Firestore 的 `rooms/{id}/members`（doc id 即 deviceId），**不要**去列
+     `tracks/{roomId}`：Node admin SDK 没有 shallow 读，列一次就把整棵轨迹树拉下来了。
+   - 点 id 是 `{createdAt}_{rand}`、毫秒时间戳定宽，故 `orderByKey().endAt("{cutoff}_")`
+     即可精确圈定旧点，无需索引。
+   - ⚠️ 该函数依赖 Firestore 复合索引 **`rooms(status ASC, expiresAt ASC)`**（见
+     `firestore.indexes.json`）。缺索引时它会每小时静默失败（只在 Cloud Logging 里报
+     FAILED_PRECONDITION），清理**完全不发生**——曾经就这么坏了很久。
 5. 旧的 Cloud Function `appendTrackPoint`（写 Firestore）已 **@deprecated**，仅为兼容旧客户端暂留。
 
 ---

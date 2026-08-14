@@ -5,6 +5,41 @@
 
 ---
 
+## 2026-08-14 — RTDB 成本治理：定期清理 + pokes 限流 + 轨迹点瘦身（全部已部署）✅
+
+RTDB 只收**存储($5/GB/月)+下载($1/GB)**,写入免费。三个改动都是"少存/少留/少下"。
+
+**🔴 顺带查出一个一直没人发现的故障**:`pruneExpiredRooms` **从上线起就每小时失败**,
+错误是 `FAILED_PRECONDITION: The query requires an index`——`rooms(status ==, expiresAt <=)`
+这个复合索引**从来没建过**,而 `firestore.indexes.json` 是空的 `[]`。
+意味着**过期房间的 RTDB 数据一次都没被清理过**。它只在 Cloud Logging 里报错,前台完全无感。
+已补进 `firestore.indexes.json` 并部署,索引 READY 后手动触发验证——**首次成功执行**。
+教训:定时函数没人看日志就等于没有,以后加定时任务要顺手确认索引。
+
+**1) 活跃房间的轨迹现在会定期清理**(纯服务端)。`pruneExpiredRooms` 加第二段:对**未过期**
+房间删 `tracks/{roomId}/{deviceId}` 中早于 48h 的点。之前只删"已过期"房间,而 `joinRoom`
+每次都把过期时间滑到 30 天后 → 天天开的家人房间**永不过期** → 轨迹无限增长(客户端只读 24h)。
+- 遍历设备用 Firestore `rooms/{id}/members`(doc id 即 deviceId),**不列 `tracks/{roomId}`**:
+  Node admin SDK 没有 shallow 读,列一次就把整棵树拉下来,反而更贵。
+- 点 id `{createdAt}_{rand}` 定宽,`orderByKey().endAt("{cutoff}_")` 精确圈定旧点,无需索引。
+
+**2) pokes 监听限流**(web + android)。原来是无查询的 `onChildAdded`,会为该房间**历史上每一条
+poke** 触发并下载,然后才在客户端按 createdAt 丢掉——房间越老越贵。改 `limitToLast(20)`。
+⚠️ **不能改用 `orderByChild('createdAt')`**:规则里一个 `.indexOn` 都没有,那样会退化成
+客户端排序、把整个节点拖下来,更贵。`push()` 的 key 本身按时间有序,`limitToLast` 无需索引。
+
+**3) 轨迹点瘦身**(web + android + 规则)。每点从 7 字段减到 **4**(`lat/lng/speed/createdAt`):
+`deviceId` 已在路径里,`accuracy`/`heading` 从来没有被渲染用过。存储和下载省约三到四成。
+- **兼容**:规则 `.validate` 从 `hasChildren(['deviceId','lat','lng','createdAt'])` 放宽为
+  `hasChildren(['lat','lng','createdAt'])`——旧 APK 仍写老格式,两种都收;三个字段的
+  子校验保留(有就必须合法)。`TrackPoint` 里 accuracy/heading 改为可选。
+  android 的 `data class TrackPoint` 本来就只有 4 个字段,无需改。
+
+**部署**:RTDB 规则(REST PUT,已 GET 回读验证)、firestore:indexes、functions、hosting、APK 全部已上。
+**验证**:typecheck + web build + `assembleDebug` 全过;手动触发 scheduler 确认函数成功执行。
+
+---
+
 ## 2026-08-14 — 追踪模式续航与干净度四项优化（web 已部署 + APK）✅
 
 骑行是最怕耗电的场景,而追踪模式恰恰把三个高频消耗同时开着。四项都做了:

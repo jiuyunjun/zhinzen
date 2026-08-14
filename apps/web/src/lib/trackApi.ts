@@ -21,20 +21,21 @@ function trackPath(roomId: string, deviceId: string): string {
 
 /**
  * Append a track point. Written directly to RTDB (like liveLocations) — RTDB has
- * no per-write cost, which suits the high-frequency append; tracks are cleaned up
- * per room when it expires (firebase functions pruneExpiredRooms). The point id is
- * `{createdAt}_{rand}` so RTDB orderByKey is chronological.
+ * no per-write cost, which suits the high-frequency append. Old points are trimmed
+ * hourly by `pruneExpiredRooms`. The point id is `{createdAt}_{rand}` so RTDB
+ * orderByKey is chronological.
+ *
+ * Deliberately only four fields: `deviceId` is already in the path, and nothing has
+ * ever rendered `accuracy` or `heading` from a track point. RTDB bills storage and
+ * download, so those three were roughly a third of the bytes for no benefit.
  */
 export async function appendTrackPoint(payload: AppendTrackPointPayload): Promise<void> {
   const { database } = getFirebaseServices();
   const createdAt = payload.createdAt ?? Date.now();
   const pointId = `${createdAt}_${Math.random().toString(16).slice(2, 8)}`;
   await set(ref(database, `${trackPath(payload.roomId, payload.deviceId)}/${pointId}`), {
-    deviceId: payload.deviceId,
     lat: payload.lat,
     lng: payload.lng,
-    accuracy: payload.accuracy,
-    heading: payload.heading,
     speed: payload.speed,
     createdAt,
   });
