@@ -6,6 +6,7 @@ import { useUiStore } from '../../state/uiStore';
 import { Wordmark } from '../../components/Wordmark';
 import { PrimaryButton } from '../../components/PrimaryButton';
 import { LangToggle } from '../../components/LangToggle';
+import { SourceLink } from '../../components/SourceLink';
 import { Icon, type IconName } from '../../components/Icon';
 import { formatRoomCode } from '../../lib/roomCode';
 import { getRoomHistory, removeRoomFromHistory } from '../../lib/roomHistory';
@@ -76,7 +77,17 @@ export function RoomChoice({ onEnterRoom }: { onEnterRoom: () => void }) {
         background: 'oklch(0.98 0.004 250)',
       }}
     >
-      <div style={{ position: 'absolute', top: 'max(20px, env(safe-area-inset-top))', right: 18 }}>
+      <div
+        style={{
+          position: 'absolute',
+          top: 'max(20px, env(safe-area-inset-top))',
+          right: 18,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+        }}
+      >
+        <SourceLink />
         <LangToggle />
       </div>
 

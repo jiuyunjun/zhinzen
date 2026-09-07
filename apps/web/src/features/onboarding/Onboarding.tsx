@@ -5,6 +5,7 @@ import { useUiStore } from '../../state/uiStore';
 import { Wordmark } from '../../components/Wordmark';
 import { PrimaryButton } from '../../components/PrimaryButton';
 import { LangToggle } from '../../components/LangToggle';
+import { SourceLink } from '../../components/SourceLink';
 
 /**
  * Onboarding — the only identity step. The user enters a display name; no
@@ -47,7 +48,17 @@ export function Onboarding({ onContinue }: { onContinue: () => void }) {
           pointerEvents: 'none',
         }}
       />
-      <div style={{ position: 'absolute', top: 'max(20px, env(safe-area-inset-top))', right: 22 }}>
+      <div
+        style={{
+          position: 'absolute',
+          top: 'max(20px, env(safe-area-inset-top))',
+          right: 22,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+        }}
+      >
+        <SourceLink />
         <LangToggle />
       </div>
 

@@ -16,7 +16,8 @@ export type IconName =
   | 'globe'
   | 'compass'
   | 'fitAll'
-  | 'trash';
+  | 'trash'
+  | 'github';
 
 interface IconProps {
   name: IconName;
@@ -88,6 +89,9 @@ const PATHS: Record<IconName, JSX.Element> = {
       <path d="M9 7V5a1 1 0 011-1h4a1 1 0 011 1v2" />
       <path d="M7 7l1 12.5a1.5 1.5 0 001.5 1.4h5a1.5 1.5 0 001.5-1.4L17 7" />
     </>
+  ),
+  github: (
+    <path d="M9.2 20.4c-4 1.2-4-2.1-5.6-2.5m11.2 5v-3.2c0-.9-.1-1.3-.6-1.8 2.3-.3 4.7-1.2 4.7-5.2a4 4 0 00-1.1-2.8c.1-.3.5-1.4-.1-2.9 0 0-.9-.3-3 1.1a10.4 10.4 0 00-5.4 0C7.2 6.7 6.3 7 6.3 7c-.6 1.5-.2 2.6-.1 2.9a4 4 0 00-1.1 2.8c0 4 2.4 4.9 4.7 5.2-.4.4-.6.9-.6 1.6v3.4" />
   ),
 };
 

@@ -10,6 +10,7 @@ export const STRINGS = {
   zh: {
     tagline: '和身边的人，实时互相找到',
     noAccount: '无需注册 · 无需登录 · 这台设备就是你',
+    sourceCode: '源码',
     yourName: '你的名字',
     namePh: '输入一个显示姓名',
     continue: '继续',
@@ -144,6 +145,7 @@ export const STRINGS = {
   en: {
     tagline: 'Find the people right around you, live',
     noAccount: 'No sign-up · No login · This device is you',
+    sourceCode: 'Source',
     yourName: 'Your name',
     namePh: 'Enter a display name',
     continue: 'Continue',
