@@ -10,6 +10,7 @@ import { useUiStore } from '../../state/uiStore';
 import { Icon, type IconName } from '../../components/Icon';
 import { Toast, useToast } from '../../components/Toast';
 import { LangToggle } from '../../components/LangToggle';
+import { SourceLink } from '../../components/SourceLink';
 import { isMapRotatable } from '../../lib/env';
 import { haptics } from '../../lib/haptics';
 import { formatRoomCode, inviteLink } from '../../lib/roomCode';
@@ -718,7 +719,8 @@ export function MapScreen({ onLeave }: { onLeave: () => void }) {
         >
           {isFamily ? '★' : '☆'}
         </button>
-        <div style={{ alignSelf: 'center' }}>
+        <div style={{ alignSelf: 'center', display: 'flex', alignItems: 'center', gap: 6 }}>
+          <SourceLink compact />
           <LangToggle />
         </div>
       </div>
