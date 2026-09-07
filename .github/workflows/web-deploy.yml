@@ -1,0 +1,50 @@
+name: Deploy Web
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "apps/web/**"
+      - "packages/**"
+      - "firebase.json"
+      - ".firebaserc"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/web-deploy.yml"
+  workflow_dispatch: {}
+
+# Never let two deploys race for the same Hosting channel.
+concurrency:
+  group: web-deploy
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - run: npm ci
+
+      # The VITE_* client config is gitignored locally (see docs/SECRETS.md);
+      # recreate the whole .env.local from one secret so the bundle has it.
+      # Vite reads env from the repo root (vite.config.ts envDir: '../..').
+      - name: Write .env.local
+        env:
+          WEB_ENV_FILE: ${{ secrets.WEB_ENV_FILE }}
+        run: printf '%s\n' "$WEB_ENV_FILE" > .env.local
+
+      - run: npm run build
+
+      - name: Deploy to Firebase Hosting
+        uses: FirebaseExtended/action-hosting-deploy@v0
+        with:
+          repoToken: ${{ secrets.GITHUB_TOKEN }}
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          projectId: zhinzen
+          channelId: live
