@@ -111,5 +111,9 @@
     <string name="uwb_disabled">System UWB is off on this phone; using Bluetooth estimate. Reopen details after turning it on</string>
     <string name="uwb_unavailable">UWB connection failed; using Bluetooth estimate. Reopen details to retry</string>
     <string name="uwb_timeout">UWB timed out or lost signal; move closer and reopen details to retry</string>
+    <string name="uwb_walk_hint">UWB precise distance · walk a few steps to estimate direction</string>
+    <string name="uwb_walk_turn">Turn and walk a few more steps to tell left from right</string>
+    <string name="uwb_walk_unstable">They may be moving; direction unreliable. Ask them to stay put</string>
+    <string name="uwb_walk_ready">Direction estimated from your walk; approximate</string>
     <string name="uwb_distance_only">UWB distance · direction unavailable</string>
 </resources>

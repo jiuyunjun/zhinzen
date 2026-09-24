@@ -52,6 +52,7 @@ fun ZhinzenApp(viewModel: AppViewModel = viewModel()) {
                         headingUp = viewModel.headingUp,
                         nearbyEstimates = viewModel.nearbyEstimates,
                         nearbyUwb = viewModel.nearbyUwb,
+                        walkDirection = viewModel.walkDirection,
                         uwbStatus = viewModel.uwbStatus,
                         nearbyScanning = viewModel.nearbyScanning,
                         isOwner = viewModel.isOwner,

@@ -116,6 +116,8 @@ import com.lazydoglab.zhinzen.nearby.NearbyEstimate
 import com.lazydoglab.zhinzen.nearby.NearbyTrend
 import com.lazydoglab.zhinzen.nearby.UwbResult
 import com.lazydoglab.zhinzen.nearby.UwbStatus
+import com.lazydoglab.zhinzen.nearby.WalkDirection
+import com.lazydoglab.zhinzen.nearby.WalkDirectionState
 import com.lazydoglab.zhinzen.data.TrackPoint
 import com.lazydoglab.zhinzen.map.TrackSimplify
 import com.lazydoglab.zhinzen.map.fitFollowPair
@@ -142,6 +144,7 @@ fun MapScreen(
     headingUp: Boolean,
     nearbyEstimates: Map<String, NearbyEstimate>,
     nearbyUwb: UwbResult?,
+    walkDirection: WalkDirection?,
     uwbStatus: UwbStatus,
     nearbyScanning: Boolean,
     isOwner: Boolean,
@@ -1048,6 +1051,7 @@ fun MapScreen(
                         deviceHeading = deviceHeading,
                         estimate = nearbyEstimates[selected.member.deviceId],
                         uwb = nearbyUwb,
+                        walkDirection = walkDirection,
                         uwbStatus = uwbStatus,
                         nearbyScanning = nearbyScanning,
                         canKick = isOwner && !selected.isSelf,
@@ -1214,6 +1218,7 @@ private fun MemberDetail(
     deviceHeading: Float?,
     estimate: NearbyEstimate?,
     uwb: UwbResult?,
+    walkDirection: WalkDirection?,
     uwbStatus: UwbStatus,
     nearbyScanning: Boolean,
     canKick: Boolean,
@@ -1256,7 +1261,7 @@ private fun MemberDetail(
         SelfEditor(member, onRename, onLeave)
     } else {
         OtherDetail(
-            member, selfLocation, deviceHeading, estimate, uwb, uwbStatus, nearbyScanning, canKick,
+            member, selfLocation, deviceHeading, estimate, uwb, walkDirection, uwbStatus, nearbyScanning, canKick,
             onKick, onPoke, following, onToggleFollow,
         )
     }
@@ -1487,6 +1492,7 @@ private fun OtherDetail(
     deviceHeading: Float?,
     estimate: NearbyEstimate?,
     uwb: UwbResult?,
+    walkDirection: WalkDirection?,
     uwbStatus: UwbStatus,
     nearbyScanning: Boolean,
     canKick: Boolean,
@@ -1645,7 +1651,10 @@ private fun OtherDetail(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            UwbArrow(azimuthDeg = uwb.azimuthDeg)
+            // Device-relative: real UWB angle first, else the walk-and-range bearing.
+            val walkRelative =
+                walkDirection?.bearingDeg?.let { b -> deviceHeading?.let { (b - it + 360f) % 360f } }
+            UwbArrow(azimuthDeg = uwb.azimuthDeg ?: walkRelative)
             Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 Text(
                     text = stringResource(R.string.uwb_distance, String.format(java.util.Locale.getDefault(), "%.1f", uwb.distanceMeters)),
@@ -1654,7 +1663,15 @@ private fun OtherDetail(
                     fontWeight = FontWeight.Bold,
                 )
                 Text(
-                    text = stringResource(if (uwb.azimuthDeg == null) R.string.uwb_distance_only else R.string.uwb_precise),
+                    text = stringResource(
+                        when {
+                            uwb.azimuthDeg != null -> R.string.uwb_precise
+                            walkRelative != null -> R.string.uwb_walk_ready
+                            walkDirection?.state == WalkDirectionState.TURN -> R.string.uwb_walk_turn
+                            walkDirection?.state == WalkDirectionState.UNSTABLE -> R.string.uwb_walk_unstable
+                            else -> R.string.uwb_walk_hint
+                        },
+                    ),
                     color = ZzColor.InkSoft,
                     fontSize = 12.sp,
                 )

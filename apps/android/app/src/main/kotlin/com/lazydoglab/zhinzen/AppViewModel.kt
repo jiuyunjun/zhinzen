@@ -37,7 +37,10 @@ import com.lazydoglab.zhinzen.nearby.NearbyEstimator
 import com.lazydoglab.zhinzen.nearby.UwbRangingController
 import com.lazydoglab.zhinzen.nearby.UwbResult
 import com.lazydoglab.zhinzen.nearby.UwbStatus
+import com.lazydoglab.zhinzen.nearby.WalkDirection
+import com.lazydoglab.zhinzen.nearby.WalkLocator
 import com.lazydoglab.zhinzen.sensor.CompassController
+import com.lazydoglab.zhinzen.sensor.StepController
 import com.lazydoglab.zhinzen.service.LocationSharingService
 import com.lazydoglab.zhinzen.util.DeviceCapabilities
 import com.lazydoglab.zhinzen.util.Haptics
@@ -92,6 +95,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val capabilities = DeviceCapabilities.detect(application)
     private val bleController = BleRangingController(application)
     private val uwbController = UwbRangingController(application)
+    private val stepController = StepController(application)
+    private val walkLocator = WalkLocator()
+    private var stepJob: Job? = null
     private val estimators = mutableMapOf<String, NearbyEstimator>()
     private var lastHistoryMembers: List<String> = emptyList()
     private var lastTrackFetchAt = 0L
@@ -180,6 +186,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private var uwbGeneration = 0L
 
     var nearbyUwb by mutableStateOf<UwbResult?>(null)
+        private set
+    /** Walk-and-range bearing when UWB gives distance only (design.md §5.7.1). */
+    var walkDirection by mutableStateOf<WalkDirection?>(null)
         private set
     /** True while BLE advertising/scanning is active (continuous while in a room). */
     var nearbyScanning by mutableStateOf(false)
@@ -314,15 +323,37 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 if (attempt == uwbGeneration) uwbStatus = status
             },
             onResult = { result ->
-                if (attempt == uwbGeneration) nearbyUwb = result
+                if (attempt == uwbGeneration) {
+                    nearbyUwb = result
+                    if (result != null && result.azimuthDeg == null) onWalkRange(result.distanceMeters)
+                }
             },
         )
+    }
+
+    /** Distance-only UWB: dead-reckon our own steps against it to estimate a bearing. */
+    private fun onWalkRange(meters: Float) {
+        if (stepJob == null) {
+            stepJob = viewModelScope.launch {
+                stepController.steps().collect { t ->
+                    val heading = deviceHeading ?: return@collect
+                    walkLocator.onStep(t, heading)
+                    walkDirection = walkLocator.estimate()
+                }
+            }
+        }
+        walkLocator.onDistance(System.currentTimeMillis(), meters)
+        walkDirection = walkLocator.estimate()
     }
 
     private fun stopUwb() {
         uwbGeneration++
         uwbController.stop()
         nearbyUwb = null
+        stepJob?.cancel()
+        stepJob = null
+        walkLocator.reset()
+        walkDirection = null
         uwbStatus = UwbStatus.IDLE
     }
 
