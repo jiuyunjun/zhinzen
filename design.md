@@ -572,8 +572,23 @@ UWB 能力：
 4. UWB 适合近距离，不适合远距离。
 5. Web 不作为 UWB 实现平台。
 
-实现（`nearby/UwbRangingController`，`androidx.core.uwb`）：
+实现（`nearby/UwbRangingController`，按系统版本选择后端）：
 
+0. 技术限制与替代方案（2026-09-25 两台 Xiaomi 17 Ultra 国行真机实测）：
+   - `androidx.core.uwb` 在设备同时声明 `cn.google.services` 与
+     `com.google.android.feature.services_updater`（国行 ROM）时不走 Play Services，
+     改走 AOSP 后端，需要另装 `androidx.core.uwb.backend` APK；普通用户设备没有该包，
+     报 `AOSP backend is not available`，UWB 在这类设备上永远无法建立会话。
+   - 替代：Android 16（API 36）+ 使用系统公开的 `android.ranging.RangingManager`
+     （Raw 配置 + `UwbRangingParams`，权限 `android.permission.RANGING`），不依赖 Play
+     Services 或额外 APK。Android 12–15 继续用 Jetpack；国行 ROM 且无 AOSP 后端时直接
+     判为不支持，保留 BLE 估距。两种后端使用同一 RTDB v2 信令字段和 CONFIG_UNICAST_DS_TWR。
+   - 系统 UWB 被关闭（部分机型设置里没有开关，由系统策略控制）时，UI 单独提示
+     “本机 UWB 未开启”，不再笼统显示“不可用”；第三方 App 无权自行打开 UWB。
+   - 部分设备 UWB 只支持测距、不支持方位角（该机 `isAzimuthalAngleSupported=false`），
+     此时只显示距离，方向仍来自 GPS 方位 + 罗盘。
+   - 后续：Android 16 的 BLE Channel Sounding（`RangingManager.BLE_CS`）可替代 RSSI 做
+     更准的蓝牙测距，但需要蓝牙配对/连接流程，另行设计，本次不实现。
 1. 仅 Android 12+ 且双方支持 UWB 时启用。双方在前台、开启共享并互相选中成员；
    UI 提示等待连接、测距、权限缺失、不可用、超时。失败时保留 BLE 粗略估距。
 2. OOB 继续使用 RTDB `rooms/{roomId}/uwb/{pairKey}/v2/{controller|controlee}/{attemptId}`。
@@ -590,7 +605,8 @@ UWB 能力：
    双方必须使用 v2 客户端。Web 保持 GPS/罗盘能力，BLE fallback 需求保留。
 
 参考：[Android UWB](https://developer.android.com/develop/connectivity/uwb)、
-[RangingParameters](https://developer.android.com/reference/androidx/core/uwb/RangingParameters)。
+[RangingParameters](https://developer.android.com/reference/androidx/core/uwb/RangingParameters)、
+[android.ranging](https://developer.android.com/reference/android/ranging/package-summary)。
 
 ---
 
@@ -1215,7 +1231,8 @@ ACCESS_BACKGROUND_LOCATION
 BLUETOOTH_SCAN
 BLUETOOTH_CONNECT
 BLUETOOTH_ADVERTISE
-UWB_RANGING
+UWB_RANGING（Android 12–15，Jetpack UWB）
+RANGING（Android 16+，android.ranging）
 POST_NOTIFICATIONS
 FOREGROUND_SERVICE_LOCATION
 ```
