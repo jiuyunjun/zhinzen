@@ -52,7 +52,7 @@ data class FollowTarget(val isRally: Boolean, val id: String)
 
 /**
  * Follow-view camera (design.md §5.10). [Follow] is course-up and anchored on you;
- * [Both] is the north-up "view both" excursion that hands itself back; [Paused] is
+ * [Both] continuously frames both positions course-up until explicitly changed; [Paused] is
  * the same session with the camera given to the user after they panned.
  */
 enum class FollowCamera { Follow, Both, Paused }
@@ -491,7 +491,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     /** The user grabbed the map: keep the session, hand back the camera. */
     fun pauseFollow() {
-        if (followTarget != null && followCamera == FollowCamera.Follow) {
+        if (followTarget != null && followCamera != FollowCamera.Paused) {
             followCamera = FollowCamera.Paused
         }
     }
@@ -500,6 +500,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     // JVM setter generated for the `followCamera` property (same trap as updateSharing).
     fun updateFollowCamera(camera: FollowCamera) {
         if (followTarget == null) return
+        if (camera != FollowCamera.Paused) {
+            headingUp = true
+            updateCompass()
+        }
         if (followCamera == camera) return
         followCamera = camera
         haptics.tap()

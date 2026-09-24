@@ -627,7 +627,9 @@ export function MapScreen({ onLeave }: { onLeave: () => void }) {
         onLongPress={onLongPress}
         // A stray pan must not end a follow session — it only hands the camera
         // back until you tap "resume".
-        onUserPan={() => setFollowMode((mode) => (mode === 'track' ? 'trackPaused' : 'free'))}
+        onUserPan={() => setFollowMode((mode) => (
+          mode === 'track' || mode === 'trackBoth' || mode === 'trackPaused' ? 'trackPaused' : 'free'
+        ))}
         onHeadingChange={onMapHeadingChange}
       />
 
@@ -843,6 +845,8 @@ export function MapScreen({ onLeave }: { onLeave: () => void }) {
           type="button"
           onClick={() => {
             haptics.tap();
+            if (isMapRotatable()) setHeadingUp(true);
+            void startCompass();
             setFollowMode('track');
           }}
           style={{
@@ -894,6 +898,8 @@ export function MapScreen({ onLeave }: { onLeave: () => void }) {
             label={t('followSelf')}
             onClick={() => {
               haptics.tap();
+              if (isMapRotatable()) setHeadingUp(true);
+              void startCompass();
               setFollowMode('track');
             }}
           />
@@ -904,6 +910,8 @@ export function MapScreen({ onLeave }: { onLeave: () => void }) {
             label={t('followViewBoth')}
             onClick={() => {
               haptics.tap();
+              if (isMapRotatable()) setHeadingUp(true);
+              void startCompass();
               setFollowMode('trackBoth');
             }}
           />

@@ -13,6 +13,7 @@ import {
 } from './constants';
 
 export * from './constants';
+export { fitFollowPair } from './followPair';
 
 const toRad = (deg: number): number => (deg * Math.PI) / 180;
 const toDeg = (rad: number): number => (rad * 180) / Math.PI;

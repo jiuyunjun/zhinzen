@@ -6,6 +6,7 @@ import {
   calculateDistance,
   destinationPoint,
   followRegime,
+  fitFollowPair,
   metersPerPixel,
   normalizeAngle,
   rayExit,
@@ -31,7 +32,7 @@ export type FollowTargetState = 'moving' | 'stopped' | 'stale';
 
 /**
  * Camera behavior. `track` is follow mode (design.md §5.10) — course-up, anchored on
- * you; `trackBoth` is its north-up "view both" excursion; `trackPaused` is the same
+ * you; `trackBoth` is its persistent course-up "view both" mode; `trackPaused` is the same
  * session with the camera handed back to the user after they panned, so a stray
  * touch doesn't end it.
  */
@@ -181,13 +182,12 @@ export function GoogleMapView({
   // Everything the per-frame camera driver reads. Kept in refs so new positions and
   // compass samples never re-render this component.
   const headingTargetRef = useRef<number | null>(null);
-  // "View both" is north-up: with the scale thrown away for a moment, a fixed north
-  // is easier to reconcile with the map you were just reading. On a raster basemap
-  // (no vector Map ID) the map physically cannot rotate, so we keep the model at
-  // north too — otherwise the overlay would compute screen directions for a rotation
-  // the map never performed.
-  headingTargetRef.current =
-    mapsMapId.length === 0 ? 0 : bothMode ? 0 : headingUp ? deviceHeading : null;
+  // Both follow modes share the same course-up heading. Raster maps stay north-up.
+  headingTargetRef.current = mapsMapId.length === 0 ? 0 : headingUp ? deviceHeading : null;
+  const pairRef = useRef<{ self: LatLng; target: LatLng } | null>(null);
+  pairRef.current = bothMode && followActive
+    ? { self: { lat: selfLat!, lng: selfLng! }, target: { lat: followLat!, lng: followLng! } }
+    : null;
   const headingTauRef = useRef(DEFAULT_FOLLOW_HEADING_TAU_MS);
   headingTauRef.current = headingFromGps
     ? DEFAULT_FOLLOW_GPS_HEADING_TAU_MS
@@ -202,6 +202,7 @@ export function GoogleMapView({
   // The zoom the follow driver last wrote; null while it isn't driving. Used to tell
   // our own zoom changes apart from the user's pinch.
   const appliedZoomRef = useRef<number | null>(null);
+  const writingCameraRef = useRef(false);
   // Wakes the camera driver after it has parked itself. Riding with the screen on is
   // exactly the case where a permanently-running 60fps loop costs real battery, so it
   // stops once the camera settles and is nudged back awake when something moves.
@@ -286,7 +287,7 @@ export function GoogleMapView({
           // overwrite it on the next frame and the map would feel frozen. Any zoom
           // that isn't the one we just applied is the user's: hand the camera back.
           const applied = appliedZoomRef.current;
-          if (applied !== null && Math.abs((map.getZoom() ?? applied) - applied) > 0.05) {
+          if (!writingCameraRef.current && applied !== null && Math.abs((map.getZoom() ?? applied) - applied) > 0.05) {
             onUserPanRef.current();
           }
         });
@@ -447,23 +448,8 @@ export function GoogleMapView({
     const target = { lat: followLat!, lng: followLng! };
 
     if (bothMode) {
-      // "View both" is a live fit: centered on the midpoint, north-up, zoomed to
-      // exactly hold the pair — and it keeps re-fitting as you both move. North-up
-      // is what makes a plain bounding box valid here.
-      const mid = { lat: (me.lat + target.lat) / 2, lng: (me.lng + target.lng) / 2 };
-      const usableW = Math.max(80, viewport.w - 80);
-      const usableH = Math.max(80, viewport.h - 350);
-      const northM = Math.abs(me.lat - target.lat) * 111_320;
-      const eastM =
-        Math.abs(me.lng - target.lng) * 111_320 * Math.cos((mid.lat * Math.PI) / 180);
-      const fitMpp = Math.max(northM / usableH, eastM / usableW, 0.5);
-      let fitZoom = Math.min(
-        DEFAULT_FOLLOW_MAX_ZOOM,
-        Math.max(DEFAULT_FOLLOW_MIN_ZOOM, zoomForMpp(mid.lat, fitMpp)),
-      );
-      const held = followRef.current;
-      if (held && Math.abs(fitZoom - held.zoom) < DEFAULT_FOLLOW_ZOOM_EPSILON) fitZoom = held.zoom;
-      followRef.current = { lat: mid.lat, lng: mid.lng, zoom: fitZoom, centered: true };
+      const fit = fitFollowPair(me, target, viewport.w, viewport.h, headingTargetRef.current ?? 0);
+      followRef.current = { ...fit, centered: true };
       wakeDriverRef.current?.();
       return;
     }
@@ -550,7 +536,11 @@ export function GoogleMapView({
         heading = headingTarget;
       }
 
-      const follow = followRef.current;
+      const pair = pairRef.current;
+      const fit = pair
+        ? fitFollowPair(pair.self, pair.target, el.clientWidth, el.clientHeight, heading)
+        : null;
+      const follow = fit ? { ...fit, centered: true } : followRef.current;
       if (!follow) {
         lat = null;
         if (!headingSettled) map.moveCamera({ heading });
@@ -579,7 +569,13 @@ export function GoogleMapView({
 
       // Ease toward the newest fix so GPS packets don't arrive as visible jumps.
       const k = 1 - Math.exp(-dt / DEFAULT_FOLLOW_CENTER_TAU_MS);
-      if (lat === null || lng === null) {
+      if (pair && fit) {
+        // The safe-area midpoint depends on zoom too. Widen immediately, ease inward.
+        zoom = Math.min(fit.zoom, zoom + (fit.zoom - zoom) * k);
+        const frameFit = fitFollowPair(pair.self, pair.target, el.clientWidth, el.clientHeight, heading, zoom);
+        lat = frameFit.lat;
+        lng = frameFit.lng;
+      } else if (lat === null || lng === null) {
         lat = follow.lat;
         lng = follow.lng;
         zoom = follow.zoom;
@@ -598,8 +594,15 @@ export function GoogleMapView({
         offsetPx === 0
           ? { lat, lng }
           : destinationPoint({ lat, lng }, heading, offsetPx * metersPerPixel(lat, zoom));
-      map.moveCamera({ center, zoom, heading });
-      appliedZoomRef.current = map.getZoom() ?? zoom;
+      // Set before moveCamera: Maps may fire zoom_changed synchronously.
+      appliedZoomRef.current = zoom;
+      writingCameraRef.current = true;
+      try {
+        map.moveCamera({ center, zoom, heading, ...(pair ? { tilt: 0 } : {}) });
+        appliedZoomRef.current = map.getZoom() ?? zoom;
+      } finally {
+        writingCameraRef.current = false;
+      }
 
       // Is the target still on screen? Ask the SDK for its own bounds rather than
       // reimplementing the projection.
@@ -627,7 +630,7 @@ export function GoogleMapView({
       appliedZoomRef.current = null;
       wakeDriverRef.current = null;
     };
-  }, [headingUp, followActive, followMode, loadState]);
+  }, [headingUp, followActive, followMode, loadState, viewport]);
 
   // On selecting any target — another member, a rally, or your own avatar — glide to
   // it in one smooth pan+zoom at a consistent street-level zoom. Runs once on

@@ -118,6 +118,7 @@ import com.lazydoglab.zhinzen.nearby.UwbResult
 import com.lazydoglab.zhinzen.nearby.UwbStatus
 import com.lazydoglab.zhinzen.data.TrackPoint
 import com.lazydoglab.zhinzen.map.TrackSimplify
+import com.lazydoglab.zhinzen.map.fitFollowPair
 import kotlin.math.cos
 import kotlin.math.roundToInt
 import kotlin.math.sin
@@ -264,6 +265,8 @@ fun MapScreen(
     // north-aligned box (wrong once the map is rotated) and resets the bearing.
     var mapSizePx by remember { mutableStateOf(IntSize.Zero) }
     val density = LocalDensity.current
+    val mapInsets = WindowInsets.systemBars
+    val layoutDirection = androidx.compose.ui.platform.LocalLayoutDirection.current
     val followLat = followPoint?.first
     val followLng = followPoint?.second
     val bothMode = followCamera == FollowCamera.Both
@@ -278,6 +281,8 @@ fun MapScreen(
     // and never see another value — which is exactly why the map stopped rotating.
     // rememberUpdatedState keeps the running loop reading the latest ones.
     val liveHeading = rememberUpdatedState(followHeading)
+    val liveHeadingFromGps = rememberUpdatedState(headingFromGps)
+    val liveSelf = rememberUpdatedState(selfLocation)
     val liveTargetLat = rememberUpdatedState(followLat)
     val liveTargetLng = rememberUpdatedState(followLng)
 
@@ -308,26 +313,8 @@ fun MapScreen(
         regimeRef.key = regime.key
 
         if (bothMode) {
-            // "View both" is a live fit: centered on the midpoint, north-up, zoomed to
-            // exactly hold the pair — and it keeps re-fitting as you both move.
-            val midLat = (me.lat + tLat) / 2
-            val midLng = (me.lng + tLng) / 2
-            val usableW = (widthDp - 2 * 40f).coerceAtLeast(80f)
-            val usableH = (heightDp - 150f - 200f).coerceAtLeast(80f)
-            val northM = kotlin.math.abs(me.lat - tLat) * 111_320.0
-            val eastM = kotlin.math.abs(me.lng - tLng) * 111_320.0 *
-                kotlin.math.cos(Math.toRadians(midLat))
-            val fitMpp = maxOf(northM / usableH, eastM / usableW, 0.5)
-            var fitZoom = Geo.zoomForMpp(midLat, fitMpp)
-                .coerceIn(FOLLOW_MIN_ZOOM, FOLLOW_MAX_ZOOM).toFloat()
-            if (desired.valid && kotlin.math.abs(fitZoom - desired.zoom) < FOLLOW_ZOOM_EPSILON) {
-                fitZoom = desired.zoom
-            }
-            desired.lat = midLat
-            desired.lng = midLng
-            desired.zoom = fitZoom
-            desired.centered = true
-            desired.valid = true
+            // The frame driver fits at its actual animated bearing, even when only heading changes.
+            desired.valid = false
             return@LaunchedEffect
         }
 
@@ -370,7 +357,12 @@ fun MapScreen(
         if (followTarget != null && followCamera == FollowCamera.Paused) return@LaunchedEffect
         if (!headingUp && !followActive) return@LaunchedEffect
         // In dp, to match metersPerPixel (Maps' zoom is defined against 256dp tiles).
+        val widthDp = with(density) { mapSizePx.width.toDp().value }
         val heightDp = with(density) { mapSizePx.height.toDp().value }
+        // Maps centers within contentPadding, so pair fitting uses that effective viewport.
+        val pairWidthDp = widthDp - (mapInsets.getLeft(density, layoutDirection) +
+            mapInsets.getRight(density, layoutDirection)) / density.density
+        val pairHeightDp = heightDp - (mapInsets.getTop(density) + mapInsets.getBottom(density)) / density.density
         val offsetDp = heightDp * FOLLOW_ANCHOR_FRAC - heightDp / 2f
         var lastNanos = 0L
         var publishedNanos = 0L
@@ -391,13 +383,10 @@ fun MapScreen(
                 if (gesturing) {
                     onPauseFollow()
                 } else {
-                    // "View both" is north-up: with the road scale dropped for a
-                    // moment, a fixed north is easier to reconcile with the map you
-                    // were just reading.
-                    val headingTarget = if (bothMode) 0f else liveHeading.value
+                    val headingTarget = liveHeading.value
                     var bearingSettled = true
-                    if ((headingUp || bothMode) && headingTarget != null) {
-                        val tau = if (headingFromGps) FOLLOW_GPS_HEADING_TAU_MS else FOLLOW_HEADING_TAU_MS
+                    if ((headingUp || followActive) && headingTarget != null) {
+                        val tau = if (liveHeadingFromGps.value) FOLLOW_GPS_HEADING_TAU_MS else FOLLOW_HEADING_TAU_MS
                         val delta = ((headingTarget - bearing + 540f) % 360f) - 180f
                         bearingSettled = kotlin.math.abs(delta) < 0.05f
                         bearing =
@@ -406,6 +395,33 @@ fun MapScreen(
                             } else {
                                 ((bearing + delta * (1f - kotlin.math.exp((-dt / tau).toFloat())) + 360f) % 360f)
                             }
+                    }
+                    if (bothMode && followActive && pairWidthDp > 0 && pairHeightDp > 0) {
+                        val me = liveSelf.value ?: return@withFrameNanos
+                        val tLat = liveTargetLat.value ?: return@withFrameNanos
+                        val tLng = liveTargetLng.value ?: return@withFrameNanos
+                        val fit = fitFollowPair(
+                            me.lat, me.lng, tLat, tLng,
+                            pairWidthDp.toDouble(), pairHeightDp.toDouble(), bearing.toDouble(),
+                        )
+                        val k = 1.0 - kotlin.math.exp(-dt / FOLLOW_CENTER_TAU_MS)
+                        // Widen immediately to keep both pins visible; ease only when zooming in.
+                        zoom = minOf(fit.zoom, zoom + (fit.zoom - zoom) * k).toFloat()
+                        val frame = fitFollowPair(
+                            me.lat, me.lng, tLat, tLng,
+                            pairWidthDp.toDouble(), pairHeightDp.toDouble(), bearing.toDouble(), zoom.toDouble(),
+                        )
+                        val current = cameraPositionState.position
+                        if (kotlin.math.abs(frame.lat - current.target.latitude) > 1e-8 ||
+                            kotlin.math.abs(frame.lng - current.target.longitude) > 1e-8 ||
+                            kotlin.math.abs(zoom - current.zoom) > 0.001f ||
+                            kotlin.math.abs(bearing - current.bearing) > 0.01f || current.tilt != 0f
+                        ) {
+                            cameraPositionState.position = CameraPosition.builder()
+                                .target(LatLng(frame.lat, frame.lng)).zoom(zoom).tilt(0f).bearing(bearing).build()
+                        }
+                        targetOffScreen = false
+                        return@withFrameNanos
                     }
                     // Nothing left to converge on → don't touch the map at all. A
                     // 60fps camera write while stopped at a light is pure battery.
