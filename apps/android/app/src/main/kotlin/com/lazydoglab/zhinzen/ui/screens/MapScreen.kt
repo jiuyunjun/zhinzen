@@ -1062,6 +1062,8 @@ fun MapScreen(
                                 onStopFollow()
                             } else {
                                 onStartFollow(FollowTarget(isRally = false, id = selected.member.deviceId))
+                                // design.md §5.10: entering follow drops the sheet to peek so the map shows.
+                                scope.launch { sheetOffset.animateTo(maxOffset) }
                             }
                         },
                         onKick = onKick,
@@ -1083,6 +1085,7 @@ fun MapScreen(
                                 onStopFollow()
                             } else {
                                 onStartFollow(FollowTarget(isRally = true, id = selectedRally.id))
+                                scope.launch { sheetOffset.animateTo(maxOffset) }
                             }
                         },
                         onSetRadius = { r -> onSetRallyRadius(selectedRally.id, r) },
