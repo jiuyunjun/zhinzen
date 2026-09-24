@@ -36,6 +36,7 @@ import com.lazydoglab.zhinzen.nearby.NearbyEstimate
 import com.lazydoglab.zhinzen.nearby.NearbyEstimator
 import com.lazydoglab.zhinzen.nearby.UwbRangingController
 import com.lazydoglab.zhinzen.nearby.UwbResult
+import com.lazydoglab.zhinzen.nearby.UwbStatus
 import com.lazydoglab.zhinzen.sensor.CompassController
 import com.lazydoglab.zhinzen.service.LocationSharingService
 import com.lazydoglab.zhinzen.util.DeviceCapabilities
@@ -173,6 +174,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     var nearbyEstimates by mutableStateOf<Map<String, NearbyEstimate>>(emptyMap())
         private set
     /** Precise UWB ranging for the selected member, when both support UWB. */
+    var uwbStatus by mutableStateOf(UwbStatus.IDLE)
+        private set
+    private var appForeground = false
+    private var uwbGeneration = 0L
+
     var nearbyUwb by mutableStateOf<UwbResult?>(null)
         private set
     /** True while BLE advertising/scanning is active (continuous while in a room). */
@@ -266,7 +272,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
      * detected automatically (no need to open anyone's detail). Idempotent.
      */
     private fun startNearby() {
-        if (nearbyScanning) return
+        if (nearbyScanning || !sharing || roomId == null) return
         if (!bleController.isSupported() || !bleController.hasPermission()) return
         nearbyScanning =
             bleController.start(deviceId) { token, rssi ->
@@ -291,19 +297,42 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     /** Precise UWB ranging for the selected peer (only if both support UWB). */
     private fun startUwb(peerId: String) {
+        stopUwb()
         val rid = roomId ?: return
-        if (capabilities["uwb"] != true) return
-        if (!uwbController.isSupported() || !uwbController.hasPermission()) return
+        if (!appForeground || !sharing) return
         val peer = members.firstOrNull { it.member.deviceId == peerId } ?: return
-        if (!peer.member.capabilities.uwb) return
-        uwbController.start(rid, deviceId, peerId) { result ->
-            viewModelScope.launch { nearbyUwb = result }
+        if (capabilities["uwb"] != true || !peer.member.capabilities.uwb) {
+            uwbStatus = UwbStatus.UNSUPPORTED
+            return
         }
+        val attempt = uwbGeneration
+        uwbController.start(
+            rid,
+            deviceId,
+            peerId,
+            onStatus = { status ->
+                if (attempt == uwbGeneration) uwbStatus = status
+            },
+            onResult = { result ->
+                if (attempt == uwbGeneration) nearbyUwb = result
+            },
+        )
     }
 
     private fun stopUwb() {
+        uwbGeneration++
         uwbController.stop()
         nearbyUwb = null
+        uwbStatus = UwbStatus.IDLE
+    }
+
+    fun onForegroundChanged(foreground: Boolean) {
+        appForeground = foreground
+        if (foreground) {
+            selectedDeviceId?.takeIf { it != deviceId }?.let(::startUwb)
+        } else {
+            stopUwb()
+        }
     }
 
     /** Send a poke / quick message to a member. */
@@ -705,6 +734,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         if (roomId != null && sharing) startLocation()
         // BLE/notification permissions are requested together; (re)start nearby once granted.
         startNearby()
+        selectedDeviceId?.takeIf { it != deviceId }?.let(::startUwb)
     }
 
     /** Pause/resume sharing this device's live location. */
@@ -712,6 +742,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         if (sharing == on) return
         haptics.tap()
         sharing = on
+        if (on) {
+            startNearby()
+            selectedDeviceId?.takeIf { it != deviceId }?.let(::startUwb)
+        } else {
+            stopUwb()
+            stopNearby()
+        }
         if (on) {
             // Immediately mark sharing again so peers update without waiting for a fix.
             val rid = roomId
@@ -954,6 +991,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         stopCompass()
         stopNearby()
         stopUwb()
+        uwbController.close()
         super.onCleared()
     }
 }

@@ -105,4 +105,10 @@
     <string name="dir_back_left">behind-left</string>
     <string name="dir_left">to your left</string>
     <string name="dir_front_left">ahead-left</string>
+    <string name="uwb_waiting">Connecting UWB: both people must share and open each other’s details</string>
+    <string name="uwb_permission">UWB needs nearby devices permission; allow it in system settings</string>
+    <string name="uwb_unsupported">UWB is unsupported on one or both devices; Bluetooth estimates remain available</string>
+    <string name="uwb_unavailable">UWB unavailable; check the system UWB switch and reopen details to retry</string>
+    <string name="uwb_timeout">UWB timed out or lost signal; move closer and reopen details to retry</string>
+    <string name="uwb_distance_only">UWB distance · direction unavailable</string>
 </resources>

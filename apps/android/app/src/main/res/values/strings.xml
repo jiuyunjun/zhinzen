@@ -106,4 +106,10 @@
     <string name="dir_back_left">左后方</string>
     <string name="dir_left">左侧</string>
     <string name="dir_front_left">左前方</string>
+    <string name="uwb_waiting">UWB 连接中：请双方开启共享并互相打开成员详情</string>
+    <string name="uwb_permission">UWB 需要附近设备权限；可在系统设置中允许</string>
+    <string name="uwb_unsupported">当前设备或对方不支持 UWB，可使用蓝牙粗略估距</string>
+    <string name="uwb_unavailable">UWB 暂不可用；请检查系统 UWB 开关，重新打开成员详情重试</string>
+    <string name="uwb_timeout">UWB 连接超时或信号中断；靠近后重新打开成员详情重试</string>
+    <string name="uwb_distance_only">UWB 精准测距 · 方向不可用</string>
 </resources>

@@ -29,6 +29,16 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onStart() {
+        super.onStart()
+        viewModel.onForegroundChanged(true)
+    }
+
+    override fun onStop() {
+        viewModel.onForegroundChanged(false)
+        super.onStop()
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)

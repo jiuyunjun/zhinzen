@@ -574,12 +574,23 @@ UWB 能力：
 
 实现（`nearby/UwbRangingController`，`androidx.core.uwb`）：
 
-1. 仅 Android 12+ 且双方 `capabilities.uwb=true` 时启用；选中对方时启动。
-2. **带外协商（OOB）走 RTDB** `rooms/{roomId}/uwb/{pairKey}`：deviceId 字典序较小者为
-   controller（决定 channel / sessionId / sessionKey），另一方为 controlee，交换 `UwbAddress`。
-3. `prepareSession` 收 `RangingResult` → 精准距离(米) + azimuth(真实方位角)；UI 显示距离 +
-   方位箭头，优先于 BLE 估计。
-4. 待加固：OOB 节点清理、握手时序、release 证书；需两台 UWB 真机验证。
+1. 仅 Android 12+ 且双方支持 UWB 时启用。双方在前台、开启共享并互相选中成员；
+   UI 提示等待连接、测距、权限缺失、不可用、超时。失败时保留 BLE 粗略估距。
+2. OOB 继续使用 RTDB `rooms/{roomId}/uwb/{pairKey}/v2/{controller|controlee}/{attemptId}`。
+   deviceId 字典序较小者为 controller，每次使用独立 push ID；参数和应答必须同时绑定
+   双方 attemptId。监听对方新 attempt 后重新建立 session，旧记录不能完成新握手。
+3. 握手最多 30 秒；测距连续 8 秒没有有效距离即结束并清空结果。停止、换人、离房、
+   关闭共享、退到后台时取消 session 和监听，只删除自己本次 attempt；注册 onDisconnect 清理。
+4. `SecureRandom` 生成 sessionId 和 8 字节 STATIC STS 参数，使用现有 profile 1 兼容设备。
+   azimuth 是设备相对角度（度），不是地理方位角；无角度时只显示距离，不伪造方向。
+5. 技术限制：既有 RTDB UWB 路径为公开读写，无设备级身份校验；本次会话隔离只解决
+   旧记录/竞态，不构成身份认证或安全带外通道。不可将其用于安全敏感测距；后续需通过
+   校验 deviceSecret 的服务端信令和 provisioned STS 加固，不在节点放长期设备密钥。
+6. UWB 平台/厂商兼容、角度方向与精度必须用两台 UWB 真机验证；本地编译和测试不能替代。
+   双方必须使用 v2 客户端。Web 保持 GPS/罗盘能力，BLE fallback 需求保留。
+
+参考：[Android UWB](https://developer.android.com/develop/connectivity/uwb)、
+[RangingParameters](https://developer.android.com/reference/androidx/core/uwb/RangingParameters)。
 
 ---
 
@@ -1650,7 +1661,7 @@ MVP 可先简化，后续必须补强。
 1. ~~Android UWB 能力检测~~、~~UWB 近距离测距和方向~~（RTDB OOB 协商，见 §5.7）。
 2. ~~蓝牙扫描 + RSSI 距离估算~~、~~UWB 不可用时 fallback~~、~~UI 显示能力状态~~（见 §5.8）。
 3. 进房间连续 BLE 自动发现 + 去趋势方向估计。
-4. **待办**：两台真机实测调参（TX/N、桶边界、UWB OOB 时序/清理）、release 证书加入 assetlinks。
+4. **待办**：两台真机实测调参（TX/N、桶边界、UWB 跨厂商兼容和方向精度）、release 证书加入 assetlinks。
 
 ---
 

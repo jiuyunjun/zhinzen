@@ -14,36 +14,44 @@ import androidx.core.uwb.UwbManager
 import com.google.firebase.database.DataSnapshot
 import com.google.firebase.database.DatabaseError
 import com.google.firebase.database.DatabaseReference
+import com.google.firebase.database.Query
 import com.google.firebase.database.ValueEventListener
 import com.lazydoglab.zhinzen.data.Backend
+import java.security.SecureRandom
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.tasks.await
-import kotlin.coroutines.resume
-import kotlin.coroutines.resumeWithException
-import kotlin.random.Random
+import kotlinx.coroutines.withTimeout
 
-/** A single UWB ranging sample: precise distance + (when available) azimuth bearing. */
+/** Azimuth is relative to the device, in degrees; it is not a compass bearing. */
 data class UwbResult(val distanceMeters: Float, val azimuthDeg: Float?)
 
-/**
- * UWB precise near-distance ranging (design.md §5.7). Only on Android 12+ devices
- * with UWB hardware, and only when both peers support it. Session parameters are
- * negotiated out-of-band over RTDB: the lexicographically smaller deviceId is the
- * controller (dictates channel/session id/key), the other is the controlee.
- *
- * Alpha API + niche hardware; needs two UWB phones to validate.
- */
+enum class UwbStatus {
+    IDLE, UNSUPPORTED, PERMISSION_REQUIRED, WAITING, RANGING, UNAVAILABLE, TIMED_OUT,
+}
+
+/** Foreground, single-peer ranging. v2 binds every exchange to both attempt IDs. */
 class UwbRangingController(context: Context) {
     private val appContext = context.applicationContext
     private val uwbManager by lazy { UwbManager.createInstance(appContext) }
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private val random = SecureRandom()
+    private val hardwareLock = Mutex()
     private var job: Job? = null
+    private var generation = 0L
 
     fun isSupported(): Boolean =
         Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
@@ -57,144 +65,169 @@ class UwbRangingController(context: Context) {
         roomId: String,
         selfDeviceId: String,
         peerDeviceId: String,
+        onStatus: (UwbStatus) -> Unit,
         onResult: (UwbResult?) -> Unit,
-    ): Boolean {
-        if (!isSupported() || !hasPermission()) return false
-        val isController = selfDeviceId < peerDeviceId
+    ) {
+        stop()
+        val current = generation
+        fun status(value: UwbStatus) {
+            if (current == generation) onStatus(value)
+        }
+        fun result(value: UwbResult?) {
+            if (current == generation) onResult(value)
+        }
+        result(null)
+        if (!isSupported() || selfDeviceId == peerDeviceId) {
+            status(UwbStatus.UNSUPPORTED)
+            return
+        }
+        if (!hasPermission()) {
+            status(UwbStatus.PERMISSION_REQUIRED)
+            return
+        }
+        val controller = selfDeviceId < peerDeviceId
         val pairKey = listOf(selfDeviceId, peerDeviceId).sorted().joinToString("_")
-        val base = Backend.database.getReference("rooms/$roomId/uwb/$pairKey")
-        job =
-            scope.launch {
-                runCatching {
-                    if (isController) runController(base, onResult) else runControlee(base, onResult)
-                }.onFailure { onResult(null) }
+        val base = Backend.database.getReference("rooms/$roomId/uwb/$pairKey/v2")
+        val own = base.child(if (controller) "controller" else "controlee").push()
+        val peer = base.child(if (controller) "controlee" else "controller")
+        job = scope.launch {
+            hardwareLock.withLock {
+                try {
+                    status(UwbStatus.WAITING)
+                    withTimeout(30_000) {
+                        own.onDisconnect().removeValue().await()
+                        own.setValue(mapOf("ready" to true)).await()
+                    }
+                    runUwbSessions(
+                        peerAttempts = peer.orderByKey().limitToLast(1).snapshots()
+                            .map { it.children.lastOrNull()?.key },
+                        onWaiting = {
+                            result(null)
+                            status(UwbStatus.WAITING)
+                        },
+                        onSample = { sample ->
+                            status(UwbStatus.RANGING)
+                            result(sample)
+                        },
+                    ) { peerAttempt, emit ->
+                        val peerRef = peer.child(peerAttempt)
+                        val exchange = own.child(peerAttempt)
+                        try {
+                            val samples = withTimeout(30_000) {
+                                if (controller) controllerSession(exchange, peerRef.child(own.key!!))
+                                else controleeSession(exchange, peerRef.child(own.key!!))
+                            }
+                            collectSession(samples, emit)
+                        } finally {
+                            exchange.removeValue()
+                        }
+                    }
+                } catch (_: TimeoutCancellationException) {
+                    status(UwbStatus.TIMED_OUT)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: UwbTimeout) {
+                    status(UwbStatus.TIMED_OUT)
+                } catch (_: Exception) {
+                    status(UwbStatus.UNAVAILABLE)
+                } finally {
+                    result(null)
+                    // Unique node: late cleanup can never delete a replacement session.
+                    // Leave onDisconnect armed if this deletion cannot reach the server.
+                    own.removeValue().addOnSuccessListener { own.onDisconnect().cancel() }
+                }
             }
-        return true
+        }
     }
 
-    private suspend fun runController(base: DatabaseReference, onResult: (UwbResult?) -> Unit) {
+    private suspend fun controllerSession(own: DatabaseReference, peer: DatabaseReference): Flow<RangingResult> {
         val session = uwbManager.controllerSessionScope()
-        val sessionId = Random.nextInt(1, Int.MAX_VALUE)
-        val sessionKey = Random.nextBytes(8)
-        base.child("controller")
-            .setValue(
-                mapOf(
-                    "address" to b64(session.localAddress.address),
-                    "channel" to session.uwbComplexChannel.channel,
-                    "preamble" to session.uwbComplexChannel.preambleIndex,
-                    "sessionId" to sessionId,
-                    "sessionKey" to b64(sessionKey),
-                ),
-            )
-            .await()
-        val peerAddress = awaitBytes(base.child("controlee").child("address"))
-        val params =
-            RangingParameters(
-                uwbConfigType = RangingParameters.CONFIG_UNICAST_DS_TWR,
-                sessionId = sessionId,
-                subSessionId = 0,
-                sessionKeyInfo = sessionKey,
-                subSessionKeyInfo = null,
-                complexChannel = session.uwbComplexChannel,
-                peerDevices = listOf(UwbDevice(UwbAddress(peerAddress))),
-                updateRateType = RangingParameters.RANGING_UPDATE_RATE_AUTOMATIC,
-            )
-        collectSession(session.prepareSession(params), onResult)
+        val sessionId = random.nextInt(Int.MAX_VALUE - 1) + 1
+        val key = ByteArray(8).also(random::nextBytes)
+        own.setValue(
+            mapOf(
+                "address" to b64(session.localAddress.address),
+                "channel" to session.uwbComplexChannel.channel,
+                "preamble" to session.uwbComplexChannel.preambleIndex,
+                "sessionId" to sessionId,
+                "sessionKey" to b64(key),
+            ),
+        ).await()
+        val ack = peer.snapshots().first { it.hasChild("address") }
+        val address = decode(ack, "address", setOf(2, 8))
+        return session.prepareSession(parameters(sessionId, key, session.uwbComplexChannel, address))
     }
 
-    private suspend fun runControlee(base: DatabaseReference, onResult: (UwbResult?) -> Unit) {
+    private suspend fun controleeSession(own: DatabaseReference, peer: DatabaseReference): Flow<RangingResult> {
+        val offer = peer.snapshots().first { it.hasChild("sessionKey") }
+        val address = decode(offer, "address", setOf(2, 8))
+        val key = decode(offer, "sessionKey", setOf(8))
+        val id = offer.child("sessionId").getValue(Int::class.java) ?: error("Missing session id")
+        val channel = offer.child("channel").getValue(Int::class.java) ?: error("Missing channel")
+        val preamble = offer.child("preamble").getValue(Int::class.java) ?: error("Missing preamble")
+        require(id > 0 && channel in setOf(5, 9) && preamble in 9..12)
         val session = uwbManager.controleeSessionScope()
-        base.child("controlee")
-            .setValue(mapOf("address" to b64(session.localAddress.address)))
-            .await()
-        val ctrl = awaitController(base.child("controller"))
-        val params =
-            RangingParameters(
-                uwbConfigType = RangingParameters.CONFIG_UNICAST_DS_TWR,
-                sessionId = ctrl.sessionId,
-                subSessionId = 0,
-                sessionKeyInfo = ctrl.sessionKey,
-                subSessionKeyInfo = null,
-                complexChannel = UwbComplexChannel(ctrl.channel, ctrl.preamble),
-                peerDevices = listOf(UwbDevice(UwbAddress(ctrl.address))),
-                updateRateType = RangingParameters.RANGING_UPDATE_RATE_AUTOMATIC,
-            )
-        collectSession(session.prepareSession(params), onResult)
+        own.setValue(mapOf("address" to b64(session.localAddress.address))).await()
+        return session.prepareSession(parameters(id, key, UwbComplexChannel(channel, preamble), address))
     }
 
-    private suspend fun collectSession(flow: Flow<RangingResult>, onResult: (UwbResult?) -> Unit) {
+    private fun parameters(id: Int, key: ByteArray, channel: UwbComplexChannel, address: ByteArray) =
+        RangingParameters(
+            uwbConfigType = RangingParameters.CONFIG_UNICAST_DS_TWR,
+            sessionId = id,
+            subSessionId = 0,
+            sessionKeyInfo = key,
+            subSessionKeyInfo = null,
+            complexChannel = channel,
+            peerDevices = listOf(UwbDevice(UwbAddress(address))),
+            updateRateType = RangingParameters.RANGING_UPDATE_RATE_AUTOMATIC,
+        )
+
+    private suspend fun collectSession(flow: Flow<RangingResult>, onResult: (UwbResult) -> Unit) {
         flow.collect { result ->
             when (result) {
                 is RangingResult.RangingResultPosition -> {
-                    val distance = result.position.distance?.value
-                    if (distance != null) onResult(UwbResult(distance, result.position.azimuth?.value))
+                    UwbSamples.valid(result.position.distance?.value, result.position.azimuth?.value)?.let(onResult)
                 }
-                is RangingResult.RangingResultPeerDisconnected -> onResult(null)
-                else -> {}
+                is RangingResult.RangingResultPeerDisconnected -> error("Peer disconnected")
+                else -> Unit
             }
         }
     }
 
     fun stop() {
+        generation++
         job?.cancel()
         job = null
     }
 
-    private data class ControllerParams(
-        val address: ByteArray,
-        val channel: Int,
-        val preamble: Int,
-        val sessionId: Int,
-        val sessionKey: ByteArray,
-    )
+    fun close() {
+        stop()
+        scope.cancel()
+    }
 
-    private suspend fun awaitBytes(ref: DatabaseReference): ByteArray =
-        suspendCancellableCoroutine { cont ->
-            val listener =
-                object : ValueEventListener {
-                    override fun onDataChange(snapshot: DataSnapshot) {
-                        val value = snapshot.getValue(String::class.java)
-                        if (value != null && cont.isActive) {
-                            ref.removeEventListener(this)
-                            cont.resume(unb64(value))
-                        }
-                    }
-
-                    override fun onCancelled(error: DatabaseError) {
-                        if (cont.isActive) cont.resumeWithException(error.toException())
-                    }
-                }
-            ref.addValueEventListener(listener)
-            cont.invokeOnCancellation { ref.removeEventListener(listener) }
+    private fun Query.snapshots(): Flow<DataSnapshot> = callbackFlow {
+        val listener = object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) { trySend(snapshot) }
+            override fun onCancelled(error: DatabaseError) { close(error.toException()) }
         }
+        addValueEventListener(listener)
+        awaitClose { removeEventListener(listener) }
+    }
 
-    private suspend fun awaitController(ref: DatabaseReference): ControllerParams =
-        suspendCancellableCoroutine { cont ->
-            val listener =
-                object : ValueEventListener {
-                    override fun onDataChange(snapshot: DataSnapshot) {
-                        val address = snapshot.child("address").getValue(String::class.java)
-                        val key = snapshot.child("sessionKey").getValue(String::class.java)
-                        val channel = snapshot.child("channel").getValue(Int::class.java)
-                        val preamble = snapshot.child("preamble").getValue(Int::class.java)
-                        val sessionId = snapshot.child("sessionId").getValue(Int::class.java)
-                        if (address != null && key != null && channel != null && preamble != null &&
-                            sessionId != null && cont.isActive
-                        ) {
-                            ref.removeEventListener(this)
-                            cont.resume(ControllerParams(unb64(address), channel, preamble, sessionId, unb64(key)))
-                        }
-                    }
-
-                    override fun onCancelled(error: DatabaseError) {
-                        if (cont.isActive) cont.resumeWithException(error.toException())
-                    }
-                }
-            ref.addValueEventListener(listener)
-            cont.invokeOnCancellation { ref.removeEventListener(listener) }
-        }
+    private fun decode(snapshot: DataSnapshot, field: String, sizes: Set<Int>): ByteArray {
+        val value = snapshot.child(field).getValue(String::class.java) ?: error("Missing $field")
+        require(value.length <= 32)
+        return Base64.decode(value, Base64.NO_WRAP).also { require(it.size in sizes) }
+    }
 
     private fun b64(bytes: ByteArray): String = Base64.encodeToString(bytes, Base64.NO_WRAP)
+}
 
-    private fun unb64(value: String): ByteArray = Base64.decode(value, Base64.NO_WRAP)
+/** Reject missing/invalid distance; angle support is optional and must not invent a heading. */
+internal object UwbSamples {
+    fun valid(distance: Float?, azimuth: Float?): UwbResult? {
+        if (distance == null || !distance.isFinite() || distance < 0) return null
+        return UwbResult(distance, azimuth?.takeIf { it.isFinite() && it in -180f..180f })
+    }
 }

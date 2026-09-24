@@ -115,6 +115,7 @@ import com.lazydoglab.zhinzen.data.RoomCode
 import com.lazydoglab.zhinzen.nearby.NearbyEstimate
 import com.lazydoglab.zhinzen.nearby.NearbyTrend
 import com.lazydoglab.zhinzen.nearby.UwbResult
+import com.lazydoglab.zhinzen.nearby.UwbStatus
 import com.lazydoglab.zhinzen.data.TrackPoint
 import com.lazydoglab.zhinzen.map.TrackSimplify
 import kotlin.math.cos
@@ -140,6 +141,7 @@ fun MapScreen(
     headingUp: Boolean,
     nearbyEstimates: Map<String, NearbyEstimate>,
     nearbyUwb: UwbResult?,
+    uwbStatus: UwbStatus,
     nearbyScanning: Boolean,
     isOwner: Boolean,
     isFamilyRoom: Boolean,
@@ -177,6 +179,7 @@ fun MapScreen(
     onToggleHeadingUp: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val supportsUwb = LocalContext.current.packageManager.hasSystemFeature("android.hardware.uwb")
     val permissions =
         rememberMultiplePermissionsState(
             buildList {
@@ -191,14 +194,14 @@ fun MapScreen(
                     add(android.Manifest.permission.BLUETOOTH_SCAN)
                     add(android.Manifest.permission.BLUETOOTH_ADVERTISE)
                     add(android.Manifest.permission.BLUETOOTH_CONNECT)
-                    add(android.Manifest.permission.UWB_RANGING)
+                    if (supportsUwb) add(android.Manifest.permission.UWB_RANGING)
                 }
             },
         )
     val granted =
         permissions.permissions.any { it.permission.endsWith("LOCATION") && it.status.isGranted }
 
-    LaunchedEffect(granted) {
+    LaunchedEffect(granted, permissions.permissions.map { it.status.isGranted }) {
         if (granted) onPermissionGranted()
     }
 
@@ -1024,6 +1027,7 @@ fun MapScreen(
                         deviceHeading = deviceHeading,
                         estimate = nearbyEstimates[selected.member.deviceId],
                         uwb = nearbyUwb,
+                        uwbStatus = uwbStatus,
                         nearbyScanning = nearbyScanning,
                         canKick = isOwner && !selected.isSelf,
                         following = followTarget?.let { !it.isRally && it.id == selected.member.deviceId } == true,
@@ -1189,6 +1193,7 @@ private fun MemberDetail(
     deviceHeading: Float?,
     estimate: NearbyEstimate?,
     uwb: UwbResult?,
+    uwbStatus: UwbStatus,
     nearbyScanning: Boolean,
     canKick: Boolean,
     following: Boolean,
@@ -1230,7 +1235,7 @@ private fun MemberDetail(
         SelfEditor(member, onRename, onLeave)
     } else {
         OtherDetail(
-            member, selfLocation, deviceHeading, estimate, uwb, nearbyScanning, canKick,
+            member, selfLocation, deviceHeading, estimate, uwb, uwbStatus, nearbyScanning, canKick,
             onKick, onPoke, following, onToggleFollow,
         )
     }
@@ -1461,6 +1466,7 @@ private fun OtherDetail(
     deviceHeading: Float?,
     estimate: NearbyEstimate?,
     uwb: UwbResult?,
+    uwbStatus: UwbStatus,
     nearbyScanning: Boolean,
     canKick: Boolean,
     onKick: (String) -> Unit,
@@ -1595,6 +1601,22 @@ private fun OtherDetail(
         )
     }
 
+    val uwbStatusText = when (uwbStatus) {
+        UwbStatus.WAITING -> R.string.uwb_waiting
+        UwbStatus.PERMISSION_REQUIRED -> R.string.uwb_permission
+        UwbStatus.UNSUPPORTED -> R.string.uwb_unsupported
+        UwbStatus.UNAVAILABLE -> R.string.uwb_unavailable
+        UwbStatus.TIMED_OUT -> R.string.uwb_timeout
+        else -> null
+    }
+    if (uwbStatusText != null) {
+        Text(
+            text = stringResource(uwbStatusText),
+            color = ZzColor.InkSoft,
+            fontSize = 12.sp,
+            modifier = Modifier.padding(top = 8.dp),
+        )
+    }
     if (uwb != null) {
         Row(
             modifier = Modifier.padding(top = 10.dp),
@@ -1604,13 +1626,13 @@ private fun OtherDetail(
             UwbArrow(azimuthDeg = uwb.azimuthDeg)
             Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 Text(
-                    text = stringResource(R.string.uwb_distance, String.format("%.1f", uwb.distanceMeters)),
+                    text = stringResource(R.string.uwb_distance, String.format(java.util.Locale.getDefault(), "%.1f", uwb.distanceMeters)),
                     color = ZzColor.Target,
                     fontSize = 16.sp,
                     fontWeight = FontWeight.Bold,
                 )
                 Text(
-                    text = stringResource(R.string.uwb_precise),
+                    text = stringResource(if (uwb.azimuthDeg == null) R.string.uwb_distance_only else R.string.uwb_precise),
                     color = ZzColor.InkSoft,
                     fontSize = 12.sp,
                 )
