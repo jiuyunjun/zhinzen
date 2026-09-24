@@ -31,6 +31,18 @@ android {
         manifestPlaceholders["MAPS_API_KEY"] = mapsApiKey
     }
 
+    signingConfigs {
+        // Committed so every machine and CI run produce the same debug signature
+        // (the AGP-generated ~/.android/debug.keystore differs per host/runner,
+        // which breaks installs that expect a stable debug cert).
+        getByName("debug") {
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false

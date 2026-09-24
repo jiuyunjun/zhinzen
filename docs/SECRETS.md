@@ -64,12 +64,18 @@ MAPS_API_KEY=...   Maps SDK for Android key →（构建时注入 AndroidManifes
 
 ## 签名密钥库(App Links / 发版会用到)
 
-- **debug keystore**(`~/.android/debug.keystore`,Android Studio 自动生成):其 SHA-256 已写进
-  `apps/web/public/.well-known/assetlinks.json`,用于 App Links 验证。换电脑会变,需重新生成并更新 assetlinks。
-- **release keystore**(发版用,目前还没有):**这是真正必须单独保管的密钥** —— 丢了就无法给同一个
-  App 发更新。生成后:① keystore 文件 + 口令存密码管理器;② 把它的 SHA-256 追加进 assetlinks.json;
-  ③ keystore 放 gitignored 路径。
-
+- **debug keystore**(`apps/android/app/debug.keystore`):已提交进 git(是调试密钥,口令是公开的
+  `android`/`android`、别名 `androiddebugkey`,不是机密),`app/build.gradle.kts` 的
+  `signingConfigs.debug` 显式指向它。这样任何机器、以及 CI 上构建出来的 debug APK
+  都用同一把密钥签名,避免“换电脑签名就变”导致安装冲突。
+  其 SHA-256(`AE:8A:53:00:42:AB:0B:A4:A7:73:0B:0C:0D:CB:2D:C7:EC:7E:A4:6C:86:88:13:AA:C7:71:18:57:F2:1C:25:73`)
+  已写进 `apps/web/public/.well-known/assetlinks.json`,用于 App Links 验证;如果 Maps API key
+  加了应用限制,也要把这个 SHA-1 加进去(不再需要“换电脑就变”)。
+  如果确实需要换掉这把 keystore,必须同步更新 assetlinks.json 与任何加了限制的 API key。
+- **release keystore**(发版用,目前还没有):**这是真正必须单独保管的密钥** —— 丢了就无法给同一个
+  App 发更新。生成后:① keystore 文件 + 口令存密码管理器;② 把它的 SHA-256 追加进 assetlinks.json;
+  ③ keystore 放 gitignored 路径(和 debug keystore 不同,release keystore 绝不能提交进 git)。
+
 ## 真正算"机密"的(目前都没有,但将来要注意)
 
 - **service account JSON**(`serviceAccountKey*.json`):服务端 / Admin SDK / CI 用。已 gitignore。**绝不入库**,只存密码管理器。
