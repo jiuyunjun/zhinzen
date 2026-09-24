@@ -604,6 +604,27 @@ UWB 能力：
 6. UWB 平台/厂商兼容、角度方向与精度必须用两台 UWB 真机验证；本地编译和测试不能替代。
    双方必须使用 v2 客户端。Web 保持 GPS/罗盘能力，BLE fallback 需求保留。
 
+#### 5.7.1 无角度设备：边走边测距估算方向
+
+设备不提供 UWB 方位角时（如 Xiaomi 17 Ultra），用“自己的走动轨迹 + UWB 距离”做多点
+测距定位，估算对方方向。实现：`nearby/WalkLocator`（纯 Kotlin 求解）+
+`sensor/StepController`（加速度计计步，不需要 ACTIVITY_RECOGNITION 权限）。
+
+1. 前提：对方基本静止；自己手持手机朝前走，行走方向取罗盘朝向；步长固定 0.7 m。
+2. 每一步按罗盘朝向推进本机相对位置（东/北，米）；每个 UWB 距离样本按时间在步点之间
+   插值得到当时位置。只用最近 25 秒的数据，对方移动过的旧数据会自然淘汰。
+3. 求解：先沿轨迹主方向做一维最小二乘得到“前后位置 + 离轨迹的横向距离”，得到关于
+   轨迹对称的两个候选点，再各自用 Gauss-Newton 拟合全部距离，比较残差。
+4. 状态：
+   - 数据不足（< 8 个样本或轨迹跨度 < 1.5 m）：提示“边走几步可估算方向”。
+   - 直线行走无法区分左右（横向散布 < 0.3 m 或两个候选残差接近）：提示“拐个弯再走
+     几步”，不显示箭头，不猜左右。
+   - 残差过大（RMS > 0.8 m）：对方可能在移动，提示方向暂不可靠，不显示箭头。
+   - 可用：箭头 = 估算方位 − 当前罗盘朝向，并注明“方向由走动估算”。
+5. 优先级：UWB 方位角 > 走动估算 > 不显示 UWB 箭头（地图详情仍保留 GPS 方位指针）。
+6. 仅在 UWB 正在测距且无方位角时运行计步；UWB 停止、换人、离开详情时清空。
+7. 限制：步长、罗盘误差和对方移动都会影响结果；需两台真机调参（步长、阈值）。
+
 参考：[Android UWB](https://developer.android.com/develop/connectivity/uwb)、
 [RangingParameters](https://developer.android.com/reference/androidx/core/uwb/RangingParameters)、
 [android.ranging](https://developer.android.com/reference/android/ranging/package-summary)。
