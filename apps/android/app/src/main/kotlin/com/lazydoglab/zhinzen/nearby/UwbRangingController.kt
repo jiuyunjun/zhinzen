@@ -4,13 +4,8 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
 import android.util.Base64
+import android.util.Log
 import androidx.core.content.ContextCompat
-import androidx.core.uwb.RangingParameters
-import androidx.core.uwb.RangingResult
-import androidx.core.uwb.UwbAddress
-import androidx.core.uwb.UwbComplexChannel
-import androidx.core.uwb.UwbDevice
-import androidx.core.uwb.UwbManager
 import com.google.firebase.database.DataSnapshot
 import com.google.firebase.database.DatabaseError
 import com.google.firebase.database.DatabaseReference
@@ -40,13 +35,13 @@ import kotlinx.coroutines.withTimeout
 data class UwbResult(val distanceMeters: Float, val azimuthDeg: Float?)
 
 enum class UwbStatus {
-    IDLE, UNSUPPORTED, PERMISSION_REQUIRED, WAITING, RANGING, UNAVAILABLE, TIMED_OUT,
+    IDLE, UNSUPPORTED, PERMISSION_REQUIRED, WAITING, RANGING, DISABLED, UNAVAILABLE, TIMED_OUT,
 }
 
 /** Foreground, single-peer ranging. v2 binds every exchange to both attempt IDs. */
 class UwbRangingController(context: Context) {
     private val appContext = context.applicationContext
-    private val uwbManager by lazy { UwbManager.createInstance(appContext) }
+    private val backend by lazy { UwbBackends.select(appContext) }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val random = SecureRandom()
     private val hardwareLock = Mutex()
@@ -58,7 +53,7 @@ class UwbRangingController(context: Context) {
             appContext.packageManager.hasSystemFeature("android.hardware.uwb")
 
     fun hasPermission(): Boolean =
-        ContextCompat.checkSelfPermission(appContext, "android.permission.UWB_RANGING") ==
+        ContextCompat.checkSelfPermission(appContext, backend.permission) ==
             PackageManager.PERMISSION_GRANTED
 
     fun start(
@@ -90,6 +85,7 @@ class UwbRangingController(context: Context) {
         val base = Backend.database.getReference("rooms/$roomId/uwb/$pairKey/v2")
         val own = base.child(if (controller) "controller" else "controlee").push()
         val peer = base.child(if (controller) "controlee" else "controller")
+        Log.i(UWB_TAG, "start backend=${backend.name} controller=$controller")
         job = scope.launch {
             hardwareLock.withLock {
                 try {
@@ -117,18 +113,27 @@ class UwbRangingController(context: Context) {
                                 if (controller) controllerSession(exchange, peerRef.child(own.key!!))
                                 else controleeSession(exchange, peerRef.child(own.key!!))
                             }
-                            collectSession(samples, emit)
+                            samples.collect { emit(it) }
                         } finally {
                             exchange.removeValue()
                         }
                     }
-                } catch (_: TimeoutCancellationException) {
+                } catch (e: TimeoutCancellationException) {
+                    Log.w(UWB_TAG, "handshake timed out", e)
                     status(UwbStatus.TIMED_OUT)
                 } catch (e: CancellationException) {
                     throw e
-                } catch (_: UwbTimeout) {
+                } catch (e: UwbTimeout) {
+                    Log.w(UWB_TAG, "no valid samples", e)
                     status(UwbStatus.TIMED_OUT)
-                } catch (_: Exception) {
+                } catch (e: UwbUnsupported) {
+                    Log.w(UWB_TAG, "unsupported on ${backend.name}", e)
+                    status(UwbStatus.UNSUPPORTED)
+                } catch (e: UwbDisabled) {
+                    Log.w(UWB_TAG, "disabled on ${backend.name}", e)
+                    status(UwbStatus.DISABLED)
+                } catch (e: Exception) {
+                    Log.w(UWB_TAG, "failed on ${backend.name}", e)
                     status(UwbStatus.UNAVAILABLE)
                 } finally {
                     result(null)
@@ -140,59 +145,44 @@ class UwbRangingController(context: Context) {
         }
     }
 
-    private suspend fun controllerSession(own: DatabaseReference, peer: DatabaseReference): Flow<RangingResult> {
-        val session = uwbManager.controllerSessionScope()
-        val sessionId = random.nextInt(Int.MAX_VALUE - 1) + 1
-        val key = ByteArray(8).also(random::nextBytes)
+    private suspend fun controllerSession(own: DatabaseReference, peer: DatabaseReference): Flow<UwbResult> {
+        val session = backend.controller()
+        val offer = UwbOffer(
+            sessionId = random.nextInt(Int.MAX_VALUE - 1) + 1,
+            sessionKey = ByteArray(8).also(random::nextBytes),
+            channel = session.channel,
+            preamble = session.preamble,
+        )
         own.setValue(
             mapOf(
-                "address" to b64(session.localAddress.address),
-                "channel" to session.uwbComplexChannel.channel,
-                "preamble" to session.uwbComplexChannel.preambleIndex,
-                "sessionId" to sessionId,
-                "sessionKey" to b64(key),
+                "address" to b64(session.address),
+                "channel" to offer.channel,
+                "preamble" to offer.preamble,
+                "sessionId" to offer.sessionId,
+                "sessionKey" to b64(offer.sessionKey),
             ),
         ).await()
+        Log.i(UWB_TAG, "offer sent, channel=${offer.channel}/${offer.preamble}")
         val ack = peer.snapshots().first { it.hasChild("address") }
         val address = decode(ack, "address", setOf(2, 8))
-        return session.prepareSession(parameters(sessionId, key, session.uwbComplexChannel, address))
+        Log.i(UWB_TAG, "ack received")
+        return session.range(offer, address)
     }
 
-    private suspend fun controleeSession(own: DatabaseReference, peer: DatabaseReference): Flow<RangingResult> {
-        val offer = peer.snapshots().first { it.hasChild("sessionKey") }
-        val address = decode(offer, "address", setOf(2, 8))
-        val key = decode(offer, "sessionKey", setOf(8))
-        val id = offer.child("sessionId").getValue(Int::class.java) ?: error("Missing session id")
-        val channel = offer.child("channel").getValue(Int::class.java) ?: error("Missing channel")
-        val preamble = offer.child("preamble").getValue(Int::class.java) ?: error("Missing preamble")
-        require(id > 0 && channel in setOf(5, 9) && preamble in 9..12)
-        val session = uwbManager.controleeSessionScope()
-        own.setValue(mapOf("address" to b64(session.localAddress.address))).await()
-        return session.prepareSession(parameters(id, key, UwbComplexChannel(channel, preamble), address))
-    }
-
-    private fun parameters(id: Int, key: ByteArray, channel: UwbComplexChannel, address: ByteArray) =
-        RangingParameters(
-            uwbConfigType = RangingParameters.CONFIG_UNICAST_DS_TWR,
-            sessionId = id,
-            subSessionId = 0,
-            sessionKeyInfo = key,
-            subSessionKeyInfo = null,
-            complexChannel = channel,
-            peerDevices = listOf(UwbDevice(UwbAddress(address))),
-            updateRateType = RangingParameters.RANGING_UPDATE_RATE_AUTOMATIC,
+    private suspend fun controleeSession(own: DatabaseReference, peer: DatabaseReference): Flow<UwbResult> {
+        val offerSnapshot = peer.snapshots().first { it.hasChild("sessionKey") }
+        val address = decode(offerSnapshot, "address", setOf(2, 8))
+        val offer = UwbOffer(
+            sessionId = offerSnapshot.child("sessionId").getValue(Int::class.java) ?: error("Missing session id"),
+            sessionKey = decode(offerSnapshot, "sessionKey", setOf(8)),
+            channel = offerSnapshot.child("channel").getValue(Int::class.java) ?: error("Missing channel"),
+            preamble = offerSnapshot.child("preamble").getValue(Int::class.java) ?: error("Missing preamble"),
         )
-
-    private suspend fun collectSession(flow: Flow<RangingResult>, onResult: (UwbResult) -> Unit) {
-        flow.collect { result ->
-            when (result) {
-                is RangingResult.RangingResultPosition -> {
-                    UwbSamples.valid(result.position.distance?.value, result.position.azimuth?.value)?.let(onResult)
-                }
-                is RangingResult.RangingResultPeerDisconnected -> error("Peer disconnected")
-                else -> Unit
-            }
-        }
+        require(offer.sessionId > 0 && offer.channel in setOf(5, 9) && offer.preamble in 9..12)
+        Log.i(UWB_TAG, "offer received, channel=${offer.channel}/${offer.preamble}")
+        val session = backend.controlee(offer)
+        own.setValue(mapOf("address" to b64(session.address))).await()
+        return session.range(offer, address)
     }
 
     fun stop() {

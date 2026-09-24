@@ -17,7 +17,8 @@ val mapsApiKey: String = localProps.getProperty("MAPS_API_KEY") ?: ""
 
 android {
     namespace = "com.lazydoglab.zhinzen"
-    compileSdk = 35
+    // 36 for the Android 16 android.ranging API (UWB on China ROMs, design.md §5.7).
+    compileSdk = 36
     // Pin to a build-tools version installed on this machine (AGP's default 35.0.0
     // isn't present); 34.0.0 is >= AGP 8.7's minimum.
     buildToolsVersion = "34.0.0"

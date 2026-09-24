@@ -195,7 +195,12 @@ fun MapScreen(
                     add(android.Manifest.permission.BLUETOOTH_SCAN)
                     add(android.Manifest.permission.BLUETOOTH_ADVERTISE)
                     add(android.Manifest.permission.BLUETOOTH_CONNECT)
-                    if (supportsUwb) add(android.Manifest.permission.UWB_RANGING)
+                    if (supportsUwb) {
+                        add(
+                            if (android.os.Build.VERSION.SDK_INT >= 36) "android.permission.RANGING"
+                            else android.Manifest.permission.UWB_RANGING,
+                        )
+                    }
                 }
             },
         )
@@ -1621,6 +1626,7 @@ private fun OtherDetail(
         UwbStatus.WAITING -> R.string.uwb_waiting
         UwbStatus.PERMISSION_REQUIRED -> R.string.uwb_permission
         UwbStatus.UNSUPPORTED -> R.string.uwb_unsupported
+        UwbStatus.DISABLED -> R.string.uwb_disabled
         UwbStatus.UNAVAILABLE -> R.string.uwb_unavailable
         UwbStatus.TIMED_OUT -> R.string.uwb_timeout
         else -> null
